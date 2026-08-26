@@ -6,7 +6,7 @@
     Standard 5-field crontab (<code>min hour dom month dow</code>), server-local time.
     Presets: every 5 min <code>*/5 * * * *</code> · hourly <code>0 * * * *</code> · daily 04:00 <code>0 4 * * *</code> · weekly Sun 04:00 <code>0 4 * * 0</code>
   </p>
-  <form method="post" action="/servers/{{ shell.id }}/schedules/add" class="stack">
+  <form method="post" action="/servers/{{ shell.id }}/schedules/add" class="stack" data-ajax data-ajax-ok="Schedule created" data-ajax-refresh="true">
     <div class="grid2">
       <label>Name <input name="name" placeholder="Nightly restart" required></label>
       <label>Cron expression <input name="cron" placeholder="0 4 * * *" required></label>
@@ -47,16 +47,16 @@
         <td class="muted">{{ t.next_run }}</td>
         <td class="muted small">{{ t.last_result }}</td>
         <td class="actions" style="justify-content:flex-end;">
-          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/run">
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/run" data-ajax data-ajax-ok="Task triggered">
             <input type="hidden" name="tid" value="{{ t.id }}">
             <button class="btn btn-sm" title="run now, regardless of schedule">▶ Run now</button>
           </form>
-          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/toggle">
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/toggle" data-ajax data-ajax-refresh="true">
             <input type="hidden" name="tid" value="{{ t.id }}">
             <input type="hidden" name="enabled" value="{% if t.enabled %}0{% else %}1{% endif %}">
             <button class="btn btn-sm">{% if t.enabled %}⏸ Pause{% else %}▶ Resume{% endif %}</button>
           </form>
-          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/delete">
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/delete" data-ajax data-ajax-ok="Schedule deleted" data-ajax-refresh="true">
             <input type="hidden" name="tid" value="{{ t.id }}">
             <button class="btn btn-sm btn-danger">Delete</button>
           </form>

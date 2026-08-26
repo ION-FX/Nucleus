@@ -4,7 +4,7 @@
 <h1>Access &amp; permissions</h1>
 <section class="glass-panel">
   <h2>Add member</h2>
-  <form method="post" action="/servers/{{ shell.id }}/access/add" class="stack">
+  <form method="post" action="/servers/{{ shell.id }}/access/add" class="stack" data-ajax data-ajax-ok="Access updated" data-ajax-refresh="true">
     <label>Email of existing user <input name="email" type="email" required placeholder="user@example.com"></label>
     <fieldset class="perm-grid">
       <legend>Permissions</legend>
@@ -26,7 +26,7 @@
       <tr>
         <td class="strong">{{ m.email }}</td>
         <td>
-          <form method="post" action="/servers/{{ shell.id }}/access/add" class="inline perm-edit">
+          <form method="post" action="/servers/{{ shell.id }}/access/add" class="inline perm-edit" data-ajax data-ajax-ok="Permissions saved" data-ajax-refresh="true">
             <input type="hidden" name="email" value="{{ m.email }}">
             {% for f in flags %}
             <label class="inline"><input type="checkbox" name="{{ f }}" {% for p in m.perms %}{% if p == f %}checked{% endif %}{% endfor %}> {{ f }}</label>
@@ -35,7 +35,7 @@
           </form>
         </td>
         <td>
-          <form method="post" action="/servers/{{ shell.id }}/access/remove">
+          <form method="post" action="/servers/{{ shell.id }}/access/remove" data-ajax data-ajax-ok="Member removed" data-ajax-refresh="true">
             <input type="hidden" name="user_id" value="{{ m.user_id }}">
             <button class="btn btn-sm btn-danger">Remove</button>
           </form>

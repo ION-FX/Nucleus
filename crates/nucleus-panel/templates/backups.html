@@ -3,7 +3,7 @@
 <section class="glass-panel">
   <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
     <h2 style="margin:0;">Backups</h2>
-    <form method="post" action="/servers/{{ shell.id }}/backups/create"><button class="btn btn-sm btn-primary">＋ Create backup</button></form>
+    <form method="post" action="/servers/{{ shell.id }}/backups/create" data-ajax data-ajax-ok="Backup created" data-ajax-refresh="true"><button class="btn btn-sm btn-primary">＋ Create backup</button></form>
   </div>
   <table class="table tight">
     <thead><tr><th>ID</th><th>Size</th><th>Created</th><th></th></tr></thead>
@@ -15,8 +15,8 @@
         <td class="muted">{{ b.created }}</td>
         <td class="actions" style="justify-content:flex-end;">
           <a class="btn btn-sm" href="{{ b.download_url }}">Download</a>
-          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/restore"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm" title="Stop the server, then extract this backup over the data directory">Restore</button></form>
-          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/delete"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm btn-danger">Delete</button></form>
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/restore" data-ajax data-ajax-ok="Restore complete — server restarting" data-ajax-refresh="true"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm" title="Stop the server, then extract this backup over the data directory">Restore</button></form>
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/delete" data-ajax data-ajax-ok="Backup deleted" data-ajax-refresh="true"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm btn-danger">Delete</button></form>
         </td>
       </tr>
     {% endfor %}

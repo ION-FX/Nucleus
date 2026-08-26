@@ -193,10 +193,10 @@ code {
   max-width: 1560px;
   margin: 0 auto;
   padding: 30px 28px 70px;
-  animation: rise 0.4s ease both;
+  animation: rise 0.22s ease both;
 }
 @keyframes rise {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0.6; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1066,3 +1066,32 @@ textarea.editor {
 }
 .copy-btn:hover { color: var(--text); border-color: var(--hover-border); }
 .copy-btn.copied { color: var(--green); border-color: rgba(76,212,149,.5); }
+
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  z-index: 200;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: var(--glass-strong);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 14px 40px -14px rgba(0,0,0,0.7), var(--inset-hi);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 550;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast-error {
+  border-color: rgba(240,104,124,.5);
+  color: var(--red);
+}

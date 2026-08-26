@@ -362,8 +362,8 @@ pub async fn users_page(
         message: crate::routes::pages::query_msg(&headers),
         message_class: "success".into(),
         error: String::new(),
-        me_email,
-        user_email: String::new(),
+        me_email: me_email.clone(),
+        user_email: me_email,
         is_admin: true,
     })
 }
