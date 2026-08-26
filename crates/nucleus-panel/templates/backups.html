@@ -1,0 +1,26 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+    <h2 style="margin:0;">Backups</h2>
+    <form method="post" action="/servers/{{ shell.id }}/backups/create"><button class="btn btn-sm btn-primary">＋ Create backup</button></form>
+  </div>
+  <table class="table tight">
+    <thead><tr><th>ID</th><th>Size</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td><code>{{ b.id }}</code></td>
+        <td>{{ b.size_mb }} MB</td>
+        <td class="muted">{{ b.created }}</td>
+        <td class="actions" style="justify-content:flex-end;">
+          <a class="btn btn-sm" href="{{ b.download_url }}">Download</a>
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/delete"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm btn-danger">Delete</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if backups.is_empty() %}<tr><td colspan="4" class="muted">No backups yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

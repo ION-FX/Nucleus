@@ -1,0 +1,22 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Install modpack</h2>
+  <p class="muted small" style="margin-top:4px;">CurseForge zip (<code>manifest.json</code>), Modrinth <code>.mrpack</code>, or a plain server-pack zip. Overrides are extracted, mods downloaded and Forge/Fabric installed automatically — progress streams into the console.</p>
+  <form method="post" action="/servers/{{ shell.id }}/install" enctype="multipart/form-data" class="stack">
+    <input type="file" name="pack" accept=".zip,.mrpack" required>
+    <button class="btn btn-primary">Upload &amp; install</button>
+  </form>
+  {% if has_script %}
+  <div style="margin-top:14px;">
+    <form method="post" action="/servers/{{ shell.id }}/install/script">
+      <button class="btn">▶ Re-run egg install script</button>
+      <span class="muted small">runs in an isolated container; safe to re-run</span>
+    </form>
+  </div>
+  {% endif %}
+  {% if !install_lines.is_empty() %}
+  <pre class="log slim">{{ install_lines }}</pre>
+  {% endif %}
+</section>
+{% endblock %}

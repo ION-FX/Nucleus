@@ -1,0 +1,5 @@
+# Nucleus Panel configuration (/etc/nucleus/panel.toml)
+
+bind = "0.0.0.0:8025"
+database = "/var/lib/nucleus/panel.db"
+static_dir = "/usr/share/nucleus/panel/static"

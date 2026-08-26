@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "Vanilla Minecraft",
+    "description": "Mojang vanilla server. Download server.jar via Files > Download from URL (or attach a modpack at creation).",
+    "docker_images": { "Java 21": "ghcr.io/pterodactyl/yolks:java_21" },
+    "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
+    "variables": [
+      { "name": "Server jar file", "env_variable": "SERVER_JARFILE", "default_value": "server.jar", "description": "The jar to run. Fetch it with Files > Download from URL.", "user_editable": true, "required": true }
+    ]
+  }
+}

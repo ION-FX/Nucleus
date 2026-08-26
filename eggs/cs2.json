@@ -1,0 +1,20 @@
+{
+  "attributes": {
+    "name": "Counter-Strike 2",
+    "description": "CS2 dedicated server (SteamCMD auto-installed on create). Requires a GameTLS token from steamcommunity.com/dev/managegameservers for public lobbies - pass it as +sv_setsteamaccount in startup if needed.",
+    "installer_image": "ghcr.io/pterodactyl/yolks:debian",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "./game/bin/linuxsteamrt64/cs2 -dedicated -ip 0.0.0.0 -port {{SERVER_PORT}} +map {{MAP}} +hostname \"{{HOSTNAME}}\" +game_type 0 +game_mode 0 +sv_lan 0",
+    "variables": [
+      { "name": "Map", "env_variable": "MAP", "default_value": "de_dust2", "user_editable": true, "required": true },
+      { "name": "Hostname", "env_variable": "HOSTNAME", "default_value": "Nucleus CS2", "user_editable": true, "required": true }
+    ],
+    "scripts": {
+      "installation": {
+        "container": "ghcr.io/pterodactyl/yolks:debian",
+        "entrypoint": "bash",
+        "script": "apt-get update -qq && apt-get install -y -qq curl ca-certificates lib32gcc-s1 lib32stdc++6 > /dev/null\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar xzf steamcmd.tar.gz\nrm -f steamcmd.tar.gz\n./steamcmd.sh +force_install_dir /data +login anonymous +app_update 730 validate +quit\nchmod +x /data/game/bin/linuxsteamrt64/cs2"
+      }
+    }
+  }
+}

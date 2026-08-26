@@ -1,0 +1,16 @@
+{% extends "server_shell.html" %}
+{% block title %}Edit {{ path }} · Nucleus{% endblock %}
+{% block server_content %}
+<div class="page-head">
+  <h1>Edit — {{ path }}</h1>
+  <a class="btn btn-sm" href="/servers/{{ shell.id }}/files">Back to files</a>
+</div>
+{% match error %}{% when Some with (e) %}<p class="error">{{ e }}</p>{% when None %}{% endmatch %}
+<section class="glass-panel" style="padding:18px;">
+<form method="post" action="/servers/{{ shell.id }}/files/edit">
+  <input type="hidden" name="path" value="{{ raw_path }}">
+  <textarea name="content" class="editor" spellcheck="false">{{ content }}</textarea>
+  <div class="actions" style="margin-top:14px;"><button class="btn btn-primary">Save changes</button></div>
+</form>
+</section>
+{% endblock %}

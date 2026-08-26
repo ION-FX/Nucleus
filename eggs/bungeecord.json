@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "BungeeCord Proxy",
+    "description": "Classic Minecraft proxy. Download BungeeCord.jar from https://ci.md-5.net/job/BungeeCord/lastSuccessfulBuild/artifact/bootstrap/target/BungeeCord.jar",
+    "docker_images": { "Java 21": "ghcr.io/pterodactyl/yolks:java_21" },
+    "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
+    "variables": [
+      { "name": "Proxy jar", "env_variable": "SERVER_JARFILE", "default_value": "BungeeCord.jar", "description": "", "user_editable": true, "required": true }
+    ]
+  }
+}

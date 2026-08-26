@@ -1,0 +1,71 @@
+{% extends "server_shell.html" %}
+{% block title %}Files — {{ shell.name }} · Nucleus{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Files</h1>
+  <a class="btn btn-sm" href="/servers/{{ shell.id }}">Back</a>
+</div>
+<p class="crumbs">{% for c in crumbs %}{% if !loop.first %}/{% endif %}<a href="/servers/{{ shell.id }}/files?path={{ c.href }}">{{ c.label }}</a>{% endfor %}</p>
+
+<div class="actions file-actions">
+  <form class="inline" method="post" action="/servers/{{ shell.id }}/files/mkdir">
+    <input name="dir" placeholder="new-folder-name" required>
+    <input type="hidden" name="cwd" value="{{ raw_path }}">
+    <button class="btn btn-sm">Create folder</button>
+  </form>
+  <form class="inline" method="post" action="/servers/{{ shell.id }}/files/upload" enctype="multipart/form-data">
+    <input type="hidden" name="cwd" value="{{ raw_path }}">
+    <input type="file" name="file" required>
+    <button class="btn btn-sm">Upload</button>
+  </form>
+  <form class="inline" method="post" action="/servers/{{ shell.id }}/files/fetch">
+    <input type="hidden" name="path" value="{{ raw_path }}">
+    <input name="url" placeholder="https://…/server.jar" size="34" required>
+    <button class="btn btn-sm">Download from URL</button>
+  </form>
+</div>
+
+<section class="glass-panel" style="margin-top:16px;">
+  <h2 style="margin-top:0;">SFTP access</h2>
+  <p class="muted small">Any SFTP client works and is jailed to this server's files.</p>
+  <table class="table tight" style="max-width:560px;">
+    <tbody>
+      <tr><td class="muted">Host</td><td><code>{{ sftp_host }}</code></td></tr>
+      <tr><td class="muted">Port</td><td><code>{{ sftp_port }}</code></td></tr>
+      <tr><td class="muted">Username</td><td><code>{{ sftp_user }}</code></td></tr>
+      <tr><td class="muted">Password</td><td><code>{{ sftp_pass }}</code></td></tr>
+    </tbody>
+  </table>
+  <form method="post" action="/servers/{{ shell.id }}/sftp/reset" style="margin-top:10px;"><button class="btn btn-sm btn-danger">Reset password</button></form>
+</section>
+
+<table class="table">
+  <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+  <tbody>
+  {% for f in entries %}
+    <tr>
+      <td>
+        {% if f.is_dir %}
+          <a class="strong" href="/servers/{{ shell.id }}/files?path={{ f.path_enc }}">📁 {{ f.name }}</a>
+        {% else %}
+          📄 {{ f.name }}
+        {% endif %}
+      </td>
+      <td>{{ f.size_text }}</td>
+      <td>{{ f.modified }}</td>
+      <td class="actions">
+        {% if f.is_editable %}
+          <a class="btn btn-sm" href="/servers/{{ shell.id }}/files/edit?path={{ f.path_enc }}">Edit</a>
+        {% endif %}
+        <a class="btn btn-sm" href="/servers/{{ shell.id }}/files/download?path={{ f.path_enc }}">Download</a>
+        <form class="inline" method="post" action="/servers/{{ shell.id }}/files/delete">
+          <input type="hidden" name="path" value="{{ f.raw_path }}">
+          <button class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  {% if entries.is_empty() %}<tr><td colspan="4" class="muted">Empty directory.</td></tr>{% endif %}
+  </tbody>
+</table>
+{% endblock %}

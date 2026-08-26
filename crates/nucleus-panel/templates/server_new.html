@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}New server · Nucleus{% endblock %}
+{% block content %}
+<h1>Create server</h1>
+{% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+
+<div class="mode-switch" role="tablist">
+  <button class="mode-btn active" data-mode="modpack" type="button">📦 From modpack <span class="muted small">recommended</span></button>
+  <button class="mode-btn" data-mode="custom" type="button">⚙ Custom / egg</button>
+</div>
+
+<section class="glass-panel">
+<form method="post" action="/servers/new" class="stack" enctype="multipart/form-data" id="create-form">
+  <input type="hidden" name="mode" id="mode-field" value="modpack">
+
+  <div class="grid2">
+    <label>Name <input name="name" required value="{{ form_name }}"></label>
+    <label>Node
+      <select name="node_id" required>
+        {% for n in nodes %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <!-- modpack mode -->
+  <div id="section-modpack">
+    <p class="muted small" style="margin:4px 0 10px;">
+      Drop a CurseForge profile/modpack zip or a Modrinth <code>.mrpack</code>.
+      Nucleus reads the manifest, picks the right Java image, downloads every mod,
+      installs Forge/Fabric automatically and generates the startup command.
+    </p>
+    <label>Modpack file <input type="file" name="modpack" accept=".zip,.mrpack" required></label>
+  </div>
+
+  <!-- custom/egg mode -->
+  <div id="section-custom" style="display:none;">
+    <label>Egg
+      <select name="egg_slug" id="egg-select">
+        <option value="custom">Custom / raw command</option>
+        {% for e in eggs %}<option value="{{ e.slug }}" data-images='{{ e.images_json|safe }}' data-startup="{{ e.startup_attr|safe }}">{{ e.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="grid2">
+      <label>Docker image <input id="image-input" name="image" placeholder="ghcr.io/pterodactyl/yolks:java_17"></label>
+      <label>&nbsp;</label>
+    </div>
+    <label>Startup command <textarea id="startup-input" name="startup_raw" rows="3" placeholder="java -Xms128M -Xmx4096M -jar server.jar"></textarea></label>
+    <div id="egg-vars" class="grid2"></div>
+  </div>
+
+  <div class="grid2">
+    <label>CPU cores <input type="number" step="0.5" name="cpu" value="2" min="0.5"></label>
+    <label>Memory (MB) <input type="number" name="mem_mb" value="4096" min="128"></label>
+  </div>
+  <label>Port mappings <span class="muted">(one per line: host:container/proto)</span>
+    <textarea name="ports" rows="2" placeholder="25565:25565/tcp">25565:25565/tcp</textarea></label>
+  <label>Stop command <input name="stop_command" placeholder="stop (empty = docker stop)"></label>
+  <label class="check"><input type="checkbox" name="accept_eula" value="1" checked> Accept Minecraft EULA on install</label>
+  <button class="btn btn-primary">Create server</button>
+</form>
+</section>
+
+<script id="eggs-data" type="application/json">{{ eggs_full_json|safe }}</script>
+<script src="/static/server_new.js"></script>
+{% endblock %}

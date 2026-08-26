@@ -1,0 +1,66 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Add schedule</h2>
+  <p class="muted small" style="margin-top:4px;">
+    Standard 5-field crontab (<code>min hour dom month dow</code>), server-local time.
+    Presets: every 5 min <code>*/5 * * * *</code> · hourly <code>0 * * * *</code> · daily 04:00 <code>0 4 * * *</code> · weekly Sun 04:00 <code>0 4 * * 0</code>
+  </p>
+  <form method="post" action="/servers/{{ shell.id }}/schedules/add" class="stack">
+    <div class="grid2">
+      <label>Name <input name="name" placeholder="Nightly restart" required></label>
+      <label>Cron expression <input name="cron" placeholder="0 4 * * *" required></label>
+    </div>
+    <div class="grid2">
+      <label>Action
+        <select name="action" id="sched-action" required>
+          <option value="command">Send console command</option>
+          <option value="power">Power action</option>
+          <option value="backup">Create backup</option>
+        </select>
+      </label>
+      <label>Payload <span class="muted">(command text / start|stop|restart|kill)</span>
+        <input name="payload" placeholder="save-all" list="payload-presets">
+      </label>
+      <datalist id="payload-presets">
+        <option value="save-all"></option>
+        <option value="restart"></option>
+        <option value="stop"></option>
+        <option value="start"></option>
+        <option value="kill"></option>
+      </datalist>
+    </div>
+    <button class="btn btn-primary">Create schedule</button>
+  </form>
+</section>
+
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Scheduled tasks</h2>
+  <table class="table tight">
+    <thead><tr><th>Name</th><th>Cron</th><th>Action</th><th>Next run</th><th>Last result</th><th></th></tr></thead>
+    <tbody>
+    {% for t in tasks %}
+      <tr>
+        <td class="strong">{{ t.name }}{% if !t.payload.is_empty() %}<br><span class="muted small">{{ t.payload }}</span>{% endif %}</td>
+        <td><code>{{ t.cron }}</code></td>
+        <td>{{ t.action }}</td>
+        <td class="muted">{{ t.next_run }}</td>
+        <td class="muted small">{{ t.last_result }}</td>
+        <td class="actions" style="justify-content:flex-end;">
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/toggle">
+            <input type="hidden" name="tid" value="{{ t.id }}">
+            <input type="hidden" name="enabled" value="{% if t.enabled %}0{% else %}1{% endif %}">
+            <button class="btn btn-sm">{% if t.enabled %}⏸ Pause{% else %}▶ Resume{% endif %}</button>
+          </form>
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/delete">
+            <input type="hidden" name="tid" value="{{ t.id }}">
+            <button class="btn btn-sm btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if tasks.is_empty() %}<tr><td colspan="6" class="muted">No schedules yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

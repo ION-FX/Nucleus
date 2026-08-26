@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "TeamSpeak 3 Server",
+    "description": "Download server files from https://teamspeak.com/en/downloads/#server (Server amd64 Linux -> tar.bz2) via Files > Download from URL. Self-extracts on first boot; grab the privileged keys from console log.",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "[ -x ts3server ] || (tar xjf {{ARCHIVE}} --strip-components=1 && chmod +x ts3server); ./ts3server license_accepted=1 default_voice_port={{SERVER_PORT}}",
+    "variables": [
+      { "name": "Archive", "env_variable": "ARCHIVE", "default_value": "teamspeak3-server_linux_amd64.tar.bz2", "description": "", "user_editable": true, "required": true }
+    ]
+  }
+}

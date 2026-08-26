@@ -1,0 +1,40 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">AI sysadmin</h2>
+  <p class="muted small">The daemon's AI agent investigates crashes from logs &amp; files and can restart or command the server. Auto-heal fires on non-zero exits when enabled in daemon config.</p>
+  <form method="post" action="/servers/{{ shell.id }}/ai/diagnose" class="stack">
+    <textarea name="note" rows="3" placeholder="Optional context — e.g. “crashes after installing a plugin”"></textarea>
+    <button class="btn btn-primary">Run diagnosis</button>
+  </form>
+  {% if !ai_error.is_empty() %}<p class="error">{{ ai_error }}</p>{% endif %}
+</section>
+
+{% match last_report %}
+{% when Some with (r) %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Last report <span class="muted small">· {{ r.finished_at }}</span></h2>
+  <pre class="wrap muted report-summary">{{ r.summary }}</pre>
+  {% if !r.actions.is_empty() %}
+  <p class="small muted"><strong>Actions taken</strong></p>
+  <ul class="report-actions">{% for a in r.actions %}<li><code>{{ a }}</code></li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% when None %}
+{% endmatch %}
+
+{% if !incidents.is_empty() %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Earlier incidents</h2>
+  {% for i in incidents %}
+  <details class="install-details">
+    <summary>{{ i.finished_at }} — {{ i.summary }}</summary>
+    <pre class="wrap muted report-summary">{{ i.summary }}</pre>
+    {% if !i.actions.is_empty() %}
+    <ul class="report-actions">{% for a in i.actions %}<li><code>{{ a }}</code></li>{% endfor %}</ul>
+    {% endif %}
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

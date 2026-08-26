@@ -1,0 +1,110 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<div class="stat-row">
+  <div class="glass-panel stat-tile">
+    <span class="small muted">CPU</span>
+    <strong id="cpu-text">–</strong>
+    <div class="bar"><i id="cpu-bar" style="width:0%"></i></div>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Memory</span>
+    <strong id="mem-text">–</strong>
+    <div class="bar"><i id="mem-bar" style="width:0%"></i></div>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Network ↓</span>
+    <strong id="rx-text">–</strong>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Network ↑</span>
+    <strong id="tx-text">–</strong>
+  </div>
+</div>
+
+<div class="console-grid">
+  <section class="glass-panel" style="padding:20px 22px 22px; margin-top:18px; min-width:0;">
+    <pre id="console-log" class="log console-embed"></pre>
+    <div class="console-input">
+      <input id="cmd" placeholder="Send a command to the server…" autocomplete="off" spellcheck="false">
+      <button id="send" class="btn btn-primary">Send</button>
+    </div>
+  </section>
+
+  <aside style="margin-top:18px; display:flex; flex-direction:column; gap:16px; min-width:0;">
+    <div class="glass-panel details-card">
+      <h2 style="margin-top:0;">Server details</h2>
+      {% if !shell.addr_full.is_empty() %}
+      <div class="detail-row">
+        <span class="small muted">Address</span>
+        <span class="detail-value">
+          <code id="conn-addr">{{ shell.addr_full }}</code>
+          <button class="copy-btn" data-copy="{{ shell.addr_full }}" title="Copy address">⧉</button>
+        </span>
+      </div>
+      <div class="detail-row">
+        <span class="small muted">Port</span>
+        <span class="detail-value">{{ shell.addr_port_text }}</span>
+      </div>
+      {% else %}
+      <div class="detail-row">
+        <span class="small muted">Address</span>
+        <span class="muted small">No allocations — add one in Network</span>
+      </div>
+      {% endif %}
+      <div class="detail-row">
+        <span class="small muted">Node</span>
+        <span class="detail-value">{{ shell.node_name }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="small muted">Image</span>
+        <span class="detail-value"><code>{{ shell.image }}</code></span>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>window.NUCLEUS_WS = "{{ ws_path|safe }}";</script>
+<script src="/static/console.js"></script>
+<script>
+(function () {
+  var fmt = function (v) { return v >= 1024 ? (v/1024).toFixed(1) + " MB/s" : v.toFixed(1) + " KB/s"; };
+  async function poll() {
+    try {
+      const r = await fetch("/servers/{{ shell.id }}/stats");
+      const s = await r.json();
+      if (!s.running) {
+        document.getElementById("cpu-text").textContent = s.error ? "node offline" : "stopped";
+        document.getElementById("mem-text").textContent = "—";
+        document.getElementById("rx-text").textContent = "—";
+        document.getElementById("tx-text").textContent = "—";
+        return;
+      }
+      document.getElementById("cpu-text").textContent = s.cpu_percent.toFixed(1) + "%";
+      document.getElementById("cpu-bar").style.width = Math.min(100, s.cpu_percent) + "%";
+      document.getElementById("mem-text").textContent =
+        s.mem_used_mb.toFixed(0) + " / " + s.mem_limit_mb.toFixed(0) + " MB";
+      document.getElementById("mem-bar").style.width = Math.min(100, s.mem_percent) + "%";
+      document.getElementById("rx-text").textContent = "↓ " + fmt(s.net_rx_kbps);
+      document.getElementById("tx-text").textContent = "↑ " + fmt(s.net_tx_kbps);
+    } catch (e) {}
+  }
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
+{% endblock %}
+
+<script>
+document.querySelectorAll(".copy-btn").forEach(function (b) {
+  b.addEventListener("click", function () {
+    navigator.clipboard.writeText(b.dataset.copy).then(function () {
+      b.classList.add("copied");
+      b.textContent = "✓";
+      setTimeout(function () {
+        b.classList.remove("copied");
+        b.textContent = "⧉";
+      }, 1200);
+    });
+  });
+});
+</script>

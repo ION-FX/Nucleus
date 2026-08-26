@@ -1,0 +1,24 @@
+# Nucleus daemon configuration (/etc/nucleus/daemon.toml)
+
+bind = "0.0.0.0:8033"
+# Shared secret the panel must present as `Authorization: Bearer <token>`.
+token = "CHANGE-ME-long-random-string"
+data_dir = "/var/lib/nucleus"
+
+# Optional: improves CurseForge mod resolution (https://console.curseforge.com)
+# Accepts a literal key or env:CF_API_KEY to read from the environment.
+curseforge_api_key = ""
+
+[ai]
+enabled = false
+provider = "openai"            # openai | anthropic  (both speak their native wire protocol)
+base_url = ""                  # optional override, e.g. https://api.anthropic.com or an OpenAI-compatible proxy
+api_key = "env:OPENAI_API_KEY" # literal key or env:VAR_NAME
+model = "gpt-4o-mini"          # e.g. claude-sonnet-4-5 for anthropic
+auto_heal = true               # run the agent automatically when a server exits non-zero
+allow_power_actions = true     # let the agent start/stop/restart/command servers itself
+max_tool_rounds = 6
+
+[sftp]
+enabled = true
+bind = "0.0.0.0:2022"

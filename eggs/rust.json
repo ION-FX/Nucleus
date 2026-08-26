@@ -1,0 +1,23 @@
+{
+  "attributes": {
+    "name": "Rust",
+    "description": "Rust dedicated server (SteamCMD auto-installed on create). First boot generates world - can take a while. Needs ~6GB RAM minimum.",
+    "installer_image": "ghcr.io/pterodactyl/yolks:debian",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "./RustDedicated -batchmode +server.port {{SERVER_PORT}} +server.hostname \"{{HOSTNAME}}\" +server.identity \"{{IDENTITY}}\" +server.maxplayers {{MAX_PLAYERS}} +server.worldsize {{WORLD_SIZE}} +server.seed {{SEED}}",
+    "variables": [
+      { "name": "Hostname", "env_variable": "HOSTNAME", "default_value": "Nucleus Rust", "user_editable": true, "required": true },
+      { "name": "Identity", "env_variable": "IDENTITY", "default_value": "nucleus", "description": "Folder name for world/save data", "user_editable": true, "required": true },
+      { "name": "Max players", "env_variable": "MAX_PLAYERS", "default_value": "50", "user_editable": true, "required": false },
+      { "name": "World size", "env_variable": "WORLD_SIZE", "default_value": "3000", "user_editable": true, "required": false },
+      { "name": "Seed", "env_variable": "SEED", "default_value": "1234567", "user_editable": true, "required": false }
+    ],
+    "scripts": {
+      "installation": {
+        "container": "ghcr.io/pterodactyl/yolks:debian",
+        "entrypoint": "bash",
+        "script": "apt-get update -qq && apt-get install -y -qq curl ca-certificates lib32gcc-s1 xz-utils > /dev/null\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar xzf steamcmd.tar.gz\nrm -f steamcmd.tar.gz\n./steamcmd.sh +force_install_dir /data +login anonymous +app_update 258550 validate +quit\nchmod +x /data/RustDedicated"
+      }
+    }
+  }
+}

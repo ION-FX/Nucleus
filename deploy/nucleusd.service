@@ -1,0 +1,18 @@
+[Unit]
+Description=Nucleus Daemon (game server agent, controls Docker)
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nucleus
+Group=docker
+SupplementaryGroups=docker
+ExecStart=/usr/local/bin/nucleusd --config /etc/nucleus/daemon.toml
+Restart=always
+RestartSec=3
+Environment=CF_API_KEY=
+Environment=OPENAI_API_KEY=
+
+[Install]
+WantedBy=multi-user.target

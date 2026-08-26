@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "Mindustry Server",
+    "description": "Anuke's Mindustry dedicated server. Download server release jar from https://github.com/Anuken/Mindustry/releases (server-release.jar) via Files > Download from URL.",
+    "docker_images": { "Java 17": "ghcr.io/pterodactyl/yolks:java_17" },
+    "startup": "java -jar {{SERVER_JARFILE}} port={{SERVER_PORT}}",
+    "variables": [
+      { "name": "Server jar", "env_variable": "SERVER_JARFILE", "default_value": "mindustry-server.jar", "description": "", "user_editable": true, "required": true }
+    ]
+  }
+}

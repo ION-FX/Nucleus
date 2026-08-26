@@ -1,0 +1,33 @@
+[package]
+name = "nucleus-panel"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nucleus-panel"
+path = "src/main.rs"
+
+[dependencies]
+nucleus-core = { path = "../nucleus-core" }
+anyhow.workspace = true
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+clap.workspace = true
+toml.workspace = true
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+argon2 = "0.5"
+rand = "0.8"
+askama = "0.12"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+urlencoding = "2"

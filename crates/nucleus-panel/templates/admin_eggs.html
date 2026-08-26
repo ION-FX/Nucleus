@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Eggs · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Eggs</h1>
+<p class="muted">Upload Pterodactyl-compatible egg <code>.json</code> files. Variables and startup commands are imported; the install script is stored for reference.</p>
+{% if !message.is_empty() %}<p class="{{ message_class }}">{{ message }}</p>{% endif %}
+<section class="glass-panel">
+<form method="post" action="/admin/eggs" enctype="multipart/form-data" class="stack">
+  <input type="file" name="egg" accept=".json" multiple required>
+  <button class="btn btn-primary">Import</button>
+</form>
+</section>
+<table class="table">
+  <thead><tr><th>Name</th><th>Slug</th><th>Images</th><th>Variables</th></tr></thead>
+  <tbody>
+  {% for e in eggs %}
+    <tr><td class="strong">{{ e.name }}</td><td><code>{{ e.slug }}</code></td><td>{{ e.images }}</td><td>{{ e.vars }}</td></tr>
+  {% endfor %}
+  {% if eggs.is_empty() %}<tr><td colspan="4" class="muted">No eggs imported yet.</td></tr>{% endif %}
+  </tbody>
+</table>
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}

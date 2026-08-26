@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "Velocity Proxy",
+    "description": "Modern Minecraft proxy. Download velocity jar from https://papermc.io/downloads/all/velocity then Files > Download from URL.",
+    "docker_images": { "Java 21": "ghcr.io/pterodactyl/yolks:java_21" },
+    "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
+    "variables": [
+      { "name": "Proxy jar", "env_variable": "SERVER_JARFILE", "default_value": "velocity.jar", "description": "velocity-*.jar", "user_editable": true, "required": true }
+    ]
+  }
+}

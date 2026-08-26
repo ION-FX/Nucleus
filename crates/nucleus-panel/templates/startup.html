@@ -1,0 +1,25 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Startup &amp; resources</h2>
+  <p class="muted small">Egg: <code>{{ egg_slug }}</code> · changes apply on restart.</p>
+  {% if !message.is_empty() %}<p class="muted">{{ message }}</p>{% endif %}
+  <form method="post" action="/servers/{{ shell.id }}/startup/save" class="stack">
+    <label>Docker image</label>
+    <input name="image" value="{{ shell.image }}" required>
+    <label>Startup command</label>
+    <textarea name="startup" rows="3" spellcheck="false" required>{{ startup_escaped|safe }}</textarea>
+    <div class="grid2">
+      <label>Memory (MB)</label>
+      <label>CPU cores</label>
+    </div>
+    <div class="grid2">
+      <input type="number" name="mem_mb" value="{{ mem_mb }}" min="128">
+      <input type="number" step="0.5" name="cpu" value="{{ cpu }}" min="0.25">
+    </div>
+    <label>Stop command <span class="muted">(empty = docker stop)</span></label>
+    <input name="stop_command" value="{{ stop_command }}">
+    <button class="btn btn-primary">Save configuration</button>
+  </form>
+</section>
+{% endblock %}

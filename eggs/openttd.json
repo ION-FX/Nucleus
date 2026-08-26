@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "OpenTTD Dedicated",
+    "description": "Download openttd-*-linux-generic-amd64.tar.gz from https://www.openttd.org/downloads/openttd-releases/latest via Files > Download from URL. Self-extracts on boot.",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "[ -x ./bin/openttd ] || (tar xzf {{ARCHIVE}} --strip-components=1); ./bin/openttd -D",
+    "variables": [
+      { "name": "Archive", "env_variable": "ARCHIVE", "default_value": "openttd-15.0-linux-generic-amd64.tar.gz", "description": "generic-amd64 build", "user_editable": true, "required": true }
+    ]
+  }
+}

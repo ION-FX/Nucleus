@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ shell.name }} · Nucleus{% endblock %}
+{% block content %}
+<div class="srv-layout">
+  <aside class="srv-sidebar glass-panel">
+    <div class="ssb-head">
+      <span class="dot {{ shell.status_class }}"></span>
+      <a href="/servers/{{ shell.id }}" class="strong ssb-name">{{ shell.name }}</a>
+    </div>
+    <nav class="ssb-nav">
+      {% let items = [("console", "🖥 Console"), ("files", "📁 Files"), ("backups", "💾 Backups"), ("modpacks", "📦 Modpacks"), ("network", "🌐 Network"), ("startup", "🚀 Startup"), ("schedules", "⏰ Schedules"),
+      ("ai", "🤖 AI sysadmin"), ("settings", "⚙ Settings")] %}
+      {% for item in items %}
+      <a href="/servers/{{ shell.id }}/{{ item.0 }}"
+         class="ssb-item {% if shell.active == item.0 %}active{% endif %}">
+        {{ item.1 }}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="ssb-foot muted small">
+      <code>{{ shell.id }}</code><br>{{ shell.node_name }}
+    </div>
+  </aside>
+
+  <div class="srv-content">
+    <header class="glass-panel srv-hero">
+      <div class="srv-title">
+        <div class="srv-heading">
+          <h1>{{ shell.name }}</h1>
+          <div class="muted srv-meta"><span>{{ shell.image }}</span></div>
+        </div>
+        <span class="chip {{ shell.status_class }}">{{ shell.status_text }}</span>
+      </div>
+      <div class="srv-power">
+        {% if !shell.running %}
+        <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="start"><button class="btn btn-sm pg pg-start">▶ Start</button></form>
+        <button class="btn btn-sm pg pg-restart" disabled>↻ Restart</button>
+        <button class="btn btn-sm pg pg-stop" disabled>■ Stop</button>
+        <button class="btn btn-sm pg pg-kill" disabled>✖ Kill</button>
+        {% else %}
+        <button class="btn btn-sm pg pg-start" disabled>▶ Start</button>
+        <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="restart"><button class="btn btn-sm pg pg-restart">↻ Restart</button></form>
+        <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="stop"><button class="btn btn-sm pg pg-stop">■ Stop</button></form>
+        <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="kill"><button class="btn btn-sm pg pg-kill">✖ Kill</button></form>
+        {% endif %}
+      </div>
+    </header>
+
+    {% block server_content %}{% endblock %}
+  </div>
+</div>
+{% endblock %}

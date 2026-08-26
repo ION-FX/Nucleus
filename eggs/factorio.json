@@ -1,0 +1,12 @@
+{
+  "attributes": {
+    "name": "Factorio Headless",
+    "description": "Download the linux headless tar.gz from https://factorio.com/download-headless (e.g. factorio_headless_x64_1.1.110.tar.gz) via Files > Download from URL into / . The server extracts itself on first boot.",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "[ -x factorio/bin/x64/factorio ] || tar xzf {{TARBALL}}; ./factorio/bin/x64/factorio --start-server {{SAVE_FILE}} --port {{SERVER_PORT}}",
+    "variables": [
+      { "name": "Headless tarball", "env_variable": "TARBALL", "default_value": "factorio_headless_x64.tar.gz", "description": "Filename of the uploaded tar.gz", "user_editable": true, "required": true },
+      { "name": "Save file", "env_variable": "SAVE_FILE", "default_value": "saves/save.zip", "description": "Generated on first run if missing (needs --create arg first: use console)", "user_editable": true, "required": true }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+[package]
+name = "nucleusd"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nucleusd"
+path = "src/main.rs"
+
+[dependencies]
+nucleus-core = { path = "../nucleus-core" }
+anyhow.workspace = true
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+clap.workspace = true
+toml.workspace = true
+bollard = "0.18"
+dashmap = "6"
+rand = "0.8"
+rand_010 = { package = "rand", version = "0.10" }
+filetime = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
+walkdir = "2"
+urlencoding = "2"
+russh = "0.63"
+russh-sftp = "2.4"
+async-trait = "0.1"

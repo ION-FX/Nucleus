@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Create admin · Nucleus{% endblock %}
+{% block nav %}{% endblock %}
+{% block content %}
+<div class="auth-card glass-panel">
+  <h1><span class="orb">⚛</span> Nucleus</h1>
+  <p class="tagline">Create the first administrator account.</p>
+  {% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/register">
+    <label>Email</label>
+    <input type="email" name="email" required autofocus placeholder="you@example.com">
+    <label>Password</label>
+    <input type="password" name="password" minlength="8" required placeholder="min. 8 characters">
+    <button class="btn btn-primary btn-block">Create account</button>
+  </form>
+</div>
+{% endblock %}

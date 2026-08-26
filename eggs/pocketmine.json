@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "PocketMine-MP (Bedrock)",
+    "description": "Minecraft Bedrock server in PHP. Download the Linux PM5 tar.gz from https://github.com/pmmp/PocketMine-MP/releases (PocketMine-MP-*.tar.gz? use the .tar.gz asset) via Files > Download from URL; self-extracts on boot.",
+    "docker_images": { "Debian": "ghcr.io/pterodactyl/yolks:debian" },
+    "startup": "[ -x bin/php8/bin/php ] || tar xzf {{ARCHIVE}}; ./bin/php8/bin/php PocketMine-MP.phar --no-wizard --disable-ansi --port={{SERVER_PORT}}",
+    "variables": [
+      { "name": "PM archive", "env_variable": "ARCHIVE", "default_value": "PocketMine-MP.tar.gz", "description": "The release tar.gz which bundles PHP + phar", "user_editable": true, "required": true }
+    ]
+  }
+}

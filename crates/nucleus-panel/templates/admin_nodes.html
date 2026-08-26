@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Nodes · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Nodes</h1>
+{% if !message.is_empty() %}<p class="{{ message_class }}">{{ message }}</p>{% endif %}
+<section class="glass-panel">
+<form method="post" action="/admin/nodes" class="stack">
+  <div class="grid2">
+    <label>Name <input name="name" required></label>
+    <label>Public address / alias <span class="muted">(players connect here)</span>
+      <input name="alias" placeholder="play.example.com"></label>
+  </div>
+  <div class="grid2">
+    <label>Daemon URL <input name="url" placeholder="https://node.example.com:8033" required></label>
+    <label>Token <input name="token" required></label>
+  </div>
+  <button class="btn btn-primary">Add node</button>
+</form>
+</section>
+<table class="table">
+  <thead><tr><th>Name</th><th>Daemon URL</th><th>Alias</th><th>Status</th><th>Token / save</th></tr></thead>
+  <tbody>
+  {% for n in nodes %}
+    <tr>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="name" value="{{ n.name }}" size="12" required></form></td>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="url" value="{{ n.url }}" size="26" required></form></td>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="alias" value="{{ n.alias }}" placeholder="play.example.com" size="16"></form></td>
+      <td><span class="dot {{ n.status_class }}"></span> {{ n.status_text }}</td>
+      <td>
+        <form method="post" action="/admin/nodes/{{ n.id }}/edit" class="inline node-edit">
+          <input type="hidden" name="name" value="{{ n.name }}">
+          <input type="hidden" name="url" value="{{ n.url }}">
+          <input type="hidden" name="alias" value="{{ n.alias }}">
+          <input name="token" value="{{ n.token }}" size="20" required title="daemon token — Save applies all fields in this row">
+          <button class="btn btn-sm btn-primary">Save</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  {% if nodes.is_empty() %}<tr><td colspan="5" class="muted">No nodes registered.</td></tr>{% endif %}
+  </tbody>
+</table>
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}

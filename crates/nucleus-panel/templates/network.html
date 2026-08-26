@@ -1,0 +1,12 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Network / allocations</h2>
+  <p class="muted small">One mapping per line: <code>host:container/proto</code>. Saving stops the server so Docker can rebind the ports — start it again afterwards.</p>
+  {% if !message.is_empty() %}<p class="muted">{{ message }}</p>{% endif %}
+  <form method="post" action="/servers/{{ shell.id }}/network/save" class="stack">
+    <textarea name="ports" rows="4" spellcheck="false">{{ ports_text }}</textarea>
+    <button class="btn btn-primary">Save &amp; stop for apply</button>
+  </form>
+</section>
+{% endblock %}

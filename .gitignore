@@ -1,0 +1,10 @@
+target/
+*.db
+*.db-shm
+*.db-wal
+nohup.out
+
+# test artifacts
+petting_real.zip
+*.log
+.DS_Store

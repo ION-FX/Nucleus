@@ -1,0 +1,22 @@
+{% extends "server_shell.html" %}
+{% block server_content %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">General</h2>
+  {% if !message.is_empty() %}<p class="muted">{{ message }}</p>{% endif %}
+  <form method="post" action="/servers/{{ shell.id }}/settings/save" class="stack" style="max-width:480px;">
+    <label>Server name</label>
+    <input name="name" value="{{ shell.name }}" required>
+    <button class="btn btn-primary">Rename</button>
+  </form>
+  <p class="muted small" style="margin-top:14px;">Node: {{ shell.node_name }} · Image: {{ shell.image }}</p>
+</section>
+
+<section class="danger-zone">
+  <h2 style="margin-top:0;">Danger zone</h2>
+  <p class="muted small">Deleting removes the container. Tick the box to also wipe every file on the node — this cannot be undone.</p>
+  <form method="post" action="/servers/{{ shell.id }}/delete" onsubmit="return confirm('Delete this server permanently?')">
+    <label class="check"><input type="checkbox" name="purge_data" value="1"> also delete all files on the node</label>
+    <button class="btn btn-danger" style="margin-top:12px;">Delete server</button>
+  </form>
+</section>
+{% endblock %}

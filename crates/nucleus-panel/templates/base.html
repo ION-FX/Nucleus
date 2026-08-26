@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Nucleus{% endblock %}</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("nucleus-theme");
+        if (t) document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="aurora" aria-hidden="true">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+</div>
+<div class="grain" aria-hidden="true"></div>
+{% block nav %}
+<nav class="topnav">
+  <a class="brand" href="/"><span class="orb">⚛</span> Nucleus</a>
+  {% if !user_email.is_empty() %}
+  <div class="nav-links">
+    <a href="/">Servers</a>
+    {% if is_admin %}<a href="/admin/nodes">Admin</a>{% endif %}
+    <div class="theme-wrap">
+      <button class="btn btn-sm" id="theme-btn" title="Change theme" aria-haspopup="true">◑ Theme</button>
+      <div class="theme-menu glass-panel" id="theme-menu" hidden>
+        <button data-set-theme="midnight"><span class="sw" style="background:linear-gradient(135deg,#17181c,#3a3d46)"></span>Midnight</button>
+        <button data-set-theme="oled"><span class="sw" style="background:linear-gradient(135deg,#000,#26262a)"></span>OLED Black</button>
+        <button data-set-theme="nebula"><span class="sw" style="background:linear-gradient(135deg,#a78bfa,#d65df0)"></span>Nebula</button>
+        <button data-set-theme="abyss"><span class="sw" style="background:linear-gradient(135deg,#67c3ee,#3d7bd6)"></span>Abyss</button>
+        <button data-set-theme="ember"><span class="sw" style="background:linear-gradient(135deg,#f5a95c,#e2603c)"></span>Ember</button>
+        <button data-set-theme="frost"><span class="sw" style="background:linear-gradient(135deg,#f2f4f8,#c9cfdd)"></span>Frost (light)</button>
+      </div>
+    </div>
+    <form method="post" action="/logout" class="inline"><button class="linklike">Log out</button></form>
+  </div>
+  {% endif %}
+</nav>
+{% endblock %}
+<main class="container">
+{% block content %}{% endblock %}
+</main>
+<script>
+(function () {
+  var btn = document.getElementById("theme-btn");
+  if (!btn) return;
+  var menu = document.getElementById("theme-menu");
+  function markActive() {
+    var cur = document.documentElement.dataset.theme || "midnight";
+    menu.querySelectorAll("[data-set-theme]").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.setTheme === cur);
+    });
+  }
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+    if (!menu.hidden) markActive();
+  });
+  menu.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-set-theme]");
+    if (!b) return;
+    var name = b.dataset.setTheme;
+    if (name === "midnight") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = name;
+    try { localStorage.setItem("nucleus-theme", name); } catch (err) {}
+    menu.hidden = true;
+  });
+  document.addEventListener("click", function (e) {
+    if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true;
+  });
+})();
+</script>
+<script src="/static/htmx.min.js"></script>
+</body>
+</html>

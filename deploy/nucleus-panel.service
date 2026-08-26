@@ -1,0 +1,18 @@
+[Unit]
+Description=Nucleus Panel (game server management web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nucleus
+Group=nucleus
+ExecStart=/usr/local/bin/nucleus-panel --config /etc/nucleus/panel.toml
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/nucleus
+
+[Install]
+WantedBy=multi-user.target

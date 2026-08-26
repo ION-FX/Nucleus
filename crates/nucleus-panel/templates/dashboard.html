@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Servers · Nucleus{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Servers</h1>
+  <a class="btn btn-primary" href="/servers/new">+ New server</a>
+</div>
+
+{% if servers.is_empty() %}
+<section class="glass-panel empty-state">
+  <p style="font-size:17px; margin:0 0 6px;">No servers yet</p>
+  <p class="muted" style="margin:0;">Spin up your first server — it takes about a minute.</p>
+</section>
+{% endif %}
+
+<div class="server-grid">
+  {% for s in servers %}
+  <div class="server-card glass-panel">
+    <div class="sc-head">
+      <span class="dot {{ s.status_class }}"></span>
+      <a class="strong sc-name" href="/servers/{{ s.id }}">{{ s.name }}</a>
+      <span class="chip {{ s.status_class }}">{{ s.status_text }}</span>
+    </div>
+    <div class="sc-meta">
+      <code>{{ s.id }}</code>
+      <span class="muted">· {{ s.node_name }}</span>
+      {% if s.running %}<span class="live-stat muted small" data-srv="{{ s.id }}">…</span>{% endif %}
+    </div>
+    <div class="sc-actions">
+      {% if s.running %}
+      <form method="post" action="/servers/{{ s.id }}/power"><input type="hidden" name="action" value="stop"><button class="btn btn-sm">Stop</button></form>
+      {% else %}
+      <form method="post" action="/servers/{{ s.id }}/power"><input type="hidden" name="action" value="start"><button class="btn btn-sm btn-primary">Start</button></form>
+      {% endif %}
+      <a class="btn btn-sm" href="/servers/{{ s.id }}/console">Console</a>
+      <a class="btn btn-sm" href="/servers/{{ s.id }}">Manage</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

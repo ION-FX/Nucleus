@@ -1,0 +1,11 @@
+{
+  "attributes": {
+    "name": "Fabric Minecraft",
+    "description": "Fabric loader server. Easiest path: create from a Fabric CurseForge/mrpack modpack and the launcher installs itself; or upload fabric-server-launch.jar manually.",
+    "docker_images": { "Java 21": "ghcr.io/pterodactyl/yolks:java_21" },
+    "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
+    "variables": [
+      { "name": "Launcher jar", "env_variable": "SERVER_JARFILE", "default_value": "fabric-server-launch.jar", "description": "From https://meta.fabricmc.net/v2/versions/loader (server jar) or via a modpack install.", "user_editable": true, "required": true }
+    ]
+  }
+}
