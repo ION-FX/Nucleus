@@ -8,14 +8,16 @@
       <a href="/servers/{{ shell.id }}" class="strong ssb-name">{{ shell.name }}</a>
     </div>
     <nav class="ssb-nav">
-      {% let items = [("console", "🖥 Console"), ("files", "📁 Files"), ("backups", "💾 Backups"), ("modpacks", "📦 Modpacks"), ("network", "🌐 Network"), ("startup", "🚀 Startup"), ("schedules", "⏰ Schedules"),
-      ("ai", "🤖 AI sysadmin"), ("settings", "⚙ Settings")] %}
-      {% for item in items %}
-      <a href="/servers/{{ shell.id }}/{{ item.0 }}"
-         class="ssb-item {% if shell.active == item.0 %}active{% endif %}">
-        {{ item.1 }}
-      </a>
-      {% endfor %}
+      {% if shell.can_console %}<a href="/servers/{{ shell.id }}" class="ssb-item {% if shell.active == "console" %}active{% endif %}">🖥 Console</a>{% endif %}
+      {% if shell.can_files %}<a href="/servers/{{ shell.id }}/files" class="ssb-item {% if shell.active == "files" %}active{% endif %}">📁 Files</a>{% endif %}
+      {% if shell.can_backups %}<a href="/servers/{{ shell.id }}/backups" class="ssb-item {% if shell.active == "backups" %}active{% endif %}">💾 Backups</a>{% endif %}
+      {% if shell.can_modpacks %}<a href="/servers/{{ shell.id }}/modpacks" class="ssb-item {% if shell.active == "modpacks" %}active{% endif %}">📦 Modpacks</a>{% endif %}
+      {% if shell.can_settings %}<a href="/servers/{{ shell.id }}/network" class="ssb-item {% if shell.active == "network" %}active{% endif %}">🌐 Network</a>{% endif %}
+      {% if shell.can_settings %}<a href="/servers/{{ shell.id }}/startup" class="ssb-item {% if shell.active == "startup" %}active{% endif %}">🚀 Startup</a>{% endif %}
+      {% if shell.can_schedules %}<a href="/servers/{{ shell.id }}/schedules" class="ssb-item {% if shell.active == "schedules" %}active{% endif %}">⏰ Schedules</a>{% endif %}
+      {% if shell.can_ai %}<a href="/servers/{{ shell.id }}/ai" class="ssb-item {% if shell.active == "ai" %}active{% endif %}">🤖 AI sysadmin</a>{% endif %}
+      {% if shell.can_access %}<a href="/servers/{{ shell.id }}/access" class="ssb-item {% if shell.active == "access" %}active{% endif %}">👥 Access</a>{% endif %}
+      {% if shell.can_settings %}<a href="/servers/{{ shell.id }}/settings" class="ssb-item {% if shell.active == "settings" %}active{% endif %}">⚙ Settings</a>{% endif %}
     </nav>
     <div class="ssb-foot muted small">
       <code>{{ shell.id }}</code><br>{{ shell.node_name }}
@@ -32,7 +34,7 @@
         <span class="chip {{ shell.status_class }}">{{ shell.status_text }}</span>
       </div>
       <div class="srv-power">
-        {% if !shell.running %}
+        {% if !shell.can_power %}{% else %}{% if !shell.running %}
         <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="start"><button class="btn btn-sm pg pg-start">▶ Start</button></form>
         <button class="btn btn-sm pg pg-restart" disabled>↻ Restart</button>
         <button class="btn btn-sm pg pg-stop" disabled>■ Stop</button>
@@ -42,7 +44,7 @@
         <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="restart"><button class="btn btn-sm pg pg-restart">↻ Restart</button></form>
         <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="stop"><button class="btn btn-sm pg pg-stop">■ Stop</button></form>
         <form method="post" action="/servers/{{ shell.id }}/power"><input type="hidden" name="action" value="kill"><button class="btn btn-sm pg pg-kill">✖ Kill</button></form>
-        {% endif %}
+        {% endif %}{% endif %}
       </div>
     </header>
 

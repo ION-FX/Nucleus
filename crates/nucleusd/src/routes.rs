@@ -87,6 +87,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/servers/{id}/schedules/{tid}",
             put(schedules_update).delete(schedules_delete),
         )
+        .route(
+            "/servers/{id}/schedules/{tid}/run",
+            post(schedule_run_now),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), auth));
 
     Router::new()
@@ -590,6 +594,20 @@ async fn rerun_script(State(state): State<Arc<AppState>>, Path(id): Path<String>
     };
     match crate::installer::start_script_install(state, rt, stored.script, stored.image) {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(e) => err(e),
+    }
+}
+
+
+async fn schedule_run_now(
+    State(state): State<Arc<AppState>>,
+    Path((id, tid)): Path<(String, String)>,
+) -> Response {
+    if let Err(e) = state.get(&id) {
+        return err(e);
+    }
+    match crate::scheduler::run_now(state, &id, &tid).await {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(e),
     }
 }

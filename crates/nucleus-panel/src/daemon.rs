@@ -344,6 +344,17 @@ impl DaemonClient {
         ensure_ok(r).await
     }
 
+    pub async fn schedule_run(&self, id: &str, tid: &str) -> Result<()> {
+        let r = self
+            .req(
+                Method::POST,
+                &format!("/api/servers/{id}/schedules/{tid}/run"),
+            )
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
+
     pub async fn rerun_install_script(&self, id: &str) -> Result<()> {
         let r = self
             .req(Method::POST, &format!("/api/servers/{id}/install/script"))

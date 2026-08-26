@@ -222,8 +222,26 @@ pub async fn dashboard(
     }
 
     let rows = list_servers(&app);
+    let user = crate::auth::Sessions::user_for(&app.db, &headers);
     let mut cards = Vec::new();
     for s in rows {
+        // Non-admins only see servers they own or are a member of.
+        if let Some(u) = &user {
+            if u.role != "admin" && s.owner_id != Some(u.id) {
+                let member = app
+                    .db
+                    .with(|c| {
+                        let mut stmt = c
+                            .prepare("SELECT 1 FROM user_servers WHERE user_id=?1 AND server_id=?2")?;
+                        let mut r = stmt.query(rusqlite::params![u.id, s.id])?;
+                        Ok(r.next()?.is_some())
+                    })
+                    .unwrap_or(false);
+                if !member {
+                    continue;
+                }
+            }
+        }
         let node = get_node(&app, &s.node_id);
         let node_name = node
             .as_ref()
@@ -656,6 +674,28 @@ pub struct ShellCtx {
     pub addr_full: String,
     /// Port as display string, empty when none.
     pub addr_port_text: String,
+    pub can_console: bool,
+    pub can_power: bool,
+    pub can_files: bool,
+    pub can_backups: bool,
+    pub can_modpacks: bool,
+    pub can_ai: bool,
+    pub can_schedules: bool,
+    pub can_settings: bool,
+    pub can_access: bool,
+}
+
+fn tab_flag(active: &str) -> &'static str {
+    match active {
+        "network" | "startup" | "settings" => "settings",
+        "files" => "files",
+        "backups" => "backups",
+        "modpacks" => "modpacks",
+        "ai" => "ai",
+        "schedules" => "schedules",
+        "access" => "access",
+        _ => "console",
+    }
 }
 
 async fn build_shell(
@@ -664,13 +704,21 @@ async fn build_shell(
     id: &str,
     active: &str,
 ) -> Result<(ShellCtx, crate::models::ServerRow, Option<DaemonClient>), Response> {
-    let (user_email, _) = nav_ctx(app, headers);
-    if user_email.is_empty() {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, headers) else {
         return Err(Redirect::to("/login").into_response());
-    }
+    };
+    let user_email = user.email.clone();
     let Some(srv) = get_server(app, id) else {
         return Err((StatusCode::NOT_FOUND, "no such server").into_response());
     };
+    let perms = crate::perms::for_server(&app.db, &user, &srv);
+    if !perms.has(tab_flag(active)) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "403 — you don't have access to this section of the server.",
+        )
+            .into_response());
+    }
     let node = get_node(app, &srv.node_id);
     let daemon = node.as_ref().map(|n| DaemonClient::new(app.http.clone(), n));
 
@@ -728,6 +776,15 @@ async fn build_shell(
             addr_host,
             addr_full,
             addr_port_text,
+            can_console: perms.has("console"),
+            can_power: perms.has("power"),
+            can_files: perms.has("files"),
+            can_backups: perms.has("backups"),
+            can_modpacks: perms.has("modpacks"),
+            can_ai: perms.has("ai"),
+            can_schedules: perms.has("schedules"),
+            can_settings: perms.has("settings"),
+            can_access: perms.has("access"),
         },
         srv,
         daemon,
@@ -1461,4 +1518,282 @@ pub async fn schedules_page(
         user_email: nav_ctx(&app, &headers).0,
         is_admin: nav_ctx(&app, &headers).1,
     }))
+}
+
+
+// ---------- server access / members ----------
+
+pub struct MemberRow {
+    pub user_id: i64,
+    pub email: String,
+    pub is_owner: bool,
+    pub perms: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "access.html")]
+pub struct AccessTmpl {
+    pub shell: ShellCtx,
+    pub owner_email: String,
+    pub members: Vec<MemberRow>,
+    pub flags: Vec<&'static str>,
+    pub message: String,
+    pub message_class: String,
+    pub error: String,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+fn access_members(app: &App, srv_id: &str) -> Vec<MemberRow> {
+    app.db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                r#"SELECT u.id, u.email, COALESCE(us.perms,'') FROM user_servers us
+                   JOIN users u ON u.id = us.user_id
+                   WHERE us.server_id = ?1 ORDER BY u.email"#,
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![srv_id], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>();
+            Ok(rows)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(user_id, email, perms)| MemberRow {
+            user_id,
+            email,
+            is_owner: false,
+            perms: perms.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect(),
+        })
+        .collect()
+}
+
+pub async fn server_access(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let (shell, srv, _) = shell_guard(&app, &headers, &id, "access").await?;
+    let (user_email, is_admin) = nav_ctx(&app, &headers);
+    let owner_email = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare("SELECT email FROM users WHERE id = ?1")?;
+            let mut rows = stmt.query(rusqlite::params![srv.owner_id])?;
+            Ok(rows.next()?.map(|r| r.get::<_, String>(0)).transpose()?.unwrap_or_default())
+        })
+        .unwrap_or_default();
+    Ok(page(&AccessTmpl {
+        shell,
+        owner_email,
+        members: access_members(&app, &id),
+        flags: crate::perms::FLAGS.to_vec(),
+        message: query_msg(&headers),
+        message_class: "success".into(),
+        error: String::new(),
+        user_email,
+        is_admin,
+    }))
+}
+
+pub fn query_msg(headers: &HeaderMap) -> String {
+    headers
+        .get(axum::http::header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| urlencoding::decode(r.split("?msg=").nth(1).unwrap_or("")).ok())
+        .map(|s| s.replace('+', " "))
+        .unwrap_or_default()
+}
+
+pub async fn access_add(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<Vec<(String, String)>>,
+) -> Response {
+    if shell_guard(&app, &headers, &id, "access").await.is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let email = form
+        .iter()
+        .find(|(k, _)| k == "email")
+        .map(|(_, v)| v.trim().to_lowercase())
+        .unwrap_or_default();
+    let flags: Vec<String> = form
+        .iter()
+        .filter(|(k, _)| k != "email")
+        .map(|(k, _)| k.clone())
+        .filter(|k| crate::perms::FLAGS.contains(&k.as_str()))
+        .collect();
+    if email.is_empty() || flags.is_empty() {
+        return Redirect::to(&format!("/servers/{id}/access")).into_response();
+    }
+    let res = app.db.with(|c| {
+        let uid: Option<i64> = c
+            .query_row("SELECT id FROM users WHERE email = ?1", rusqlite::params![email], |r| r.get(0))
+            .ok();
+        let Some(uid) = uid else { return Err(anyhow::anyhow!("no user with that email")) };
+        c.execute(
+            "INSERT OR REPLACE INTO user_servers (user_id, server_id, perms) VALUES (?1,?2,?3)",
+            rusqlite::params![uid, id, flags.join(",")],
+        )?;
+        Ok(())
+    });
+    match res {
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "access.grant", &id, &format!("{email}: {}", flags.join(",")));
+            Redirect::to(&format!("/servers/{id}/access")).into_response()
+        }
+        Err(_) => Redirect::to(&format!("/servers/{id}/access")).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct AccessRemoveForm {
+    pub user_id: i64,
+}
+
+pub async fn access_remove(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<AccessRemoveForm>,
+) -> Response {
+    if shell_guard(&app, &headers, &id, "access").await.is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let _ = app.db.with(|c| {
+        c.execute(
+            "DELETE FROM user_servers WHERE user_id=?1 AND server_id=?2",
+            rusqlite::params![form.user_id, id],
+        )?;
+        Ok(())
+    });
+    crate::perms::record(&app.db, &user.email, "access.revoke", &id, &format!("uid {}", form.user_id));
+    Redirect::to(&format!("/servers/{id}/access")).into_response()
+}
+
+// ---------- account page ----------
+
+#[derive(Template)]
+#[template(path = "account.html")]
+pub struct AccountTmpl {
+    pub user_email: String,
+    pub is_admin: bool,
+    pub message: String,
+    pub error: String,
+}
+
+pub async fn account_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let (user_email, is_admin) = nav_ctx(&app, &headers);
+    if user_email.is_empty() {
+        return Err(Redirect::to("/login").into_response());
+    }
+    Ok(page(&AccountTmpl { user_email, is_admin, message: String::new(), error: String::new() }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct PasswordForm {
+    pub current: String,
+    pub new: String,
+}
+
+pub async fn account_password(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<PasswordForm>,
+) -> Response {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let ok = app
+        .db
+        .with(|c| {
+            let hash: String = c.query_row(
+                "SELECT password_hash FROM users WHERE id = ?1",
+                rusqlite::params![user.id],
+                |r| r.get(0),
+            )?;
+            Ok(hash)
+        })
+        .map(|h| crate::auth::verify_password(&form.current, &h))
+        .unwrap_or(false);
+    if !ok {
+        return page(&AccountTmpl {
+            user_email: user.email.clone(),
+            is_admin: user.role == "admin",
+            message: String::new(),
+            error: "Current password is incorrect.".into(),
+        })
+        .into_response();
+    }
+    if form.new.len() < 8 {
+        return page(&AccountTmpl {
+            user_email: user.email.clone(),
+            is_admin: user.role == "admin",
+            message: String::new(),
+            error: "New password must be at least 8 characters.".into(),
+        })
+        .into_response();
+    }
+    let new_hash = match crate::auth::hash_password(&form.new) {
+        Ok(h) => h,
+        Err(e) => {
+            return page(&AccountTmpl {
+                user_email: user.email.clone(),
+                is_admin: user.role == "admin",
+                message: String::new(),
+                error: format!("hash failed: {e}"),
+            })
+            .into_response()
+        }
+    };
+    let _ = app.db.with(|c| {
+        c.execute(
+            "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+            rusqlite::params![new_hash, user.id],
+        )?;
+        Ok(())
+    });
+    // invalidate other sessions of this user
+    let _ = app.db.with(|c| {
+        c.execute(
+            "DELETE FROM sessions WHERE user_id = ?1",
+            rusqlite::params![user.id],
+        )?;
+        Ok(())
+    });
+    crate::perms::record(&app.db, &user.email, "account.password_change", &user.email, "");
+    let token = crate::auth::Sessions::create(&app.db, user.id).unwrap_or_default();
+    let mut resp = Redirect::to("/account").into_response();
+    resp.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        axum::http::HeaderValue::from_str(&crate::auth::Sessions::session_cookie(&token))
+            .unwrap(),
+    );
+    resp
+}
+
+pub fn query_msg_pub(headers: &HeaderMap) -> (String, bool) {
+    headers
+        .get(axum::http::header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| {
+            let err = r.contains("?err=");
+            let part = r.split("?msg=").nth(1).or_else(|| r.split("?err=").nth(1))?;
+            urlencoding::decode(part).ok().map(|s| (s.replace('+', " "), err))
+        })
+        .unwrap_or_default()
 }

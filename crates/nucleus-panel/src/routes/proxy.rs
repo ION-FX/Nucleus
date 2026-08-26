@@ -7,13 +7,16 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use futures_util::{SinkExt, StreamExt};
 
-fn require_login(app: &App, headers: &HeaderMap) -> Option<()> {
-    let (email, _) = nav_ctx(app, headers);
-    if email.is_empty() {
-        None
-    } else {
-        Some(())
-    }
+/// Authenticated user with at least `flag` permission on server `id`.
+fn require_perm(
+    app: &App,
+    headers: &HeaderMap,
+    id: &str,
+    flag: &str,
+) -> Option<crate::models::User> {
+    let user = crate::auth::Sessions::user_for(&app.db, headers)?;
+    let srv = get_server(app, id)?;
+    crate::perms::allowed(&app.db, &user, &srv, flag).then_some(user)
 }
 
 async fn daemon_for_server(
@@ -34,7 +37,7 @@ pub async fn server_stats(
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    if require_perm(&app, &headers, &id, "console").is_none() {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
@@ -60,9 +63,9 @@ pub async fn power(
     headers: HeaderMap,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "power") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let action = form
         .iter()
         .find(|(k, _)| k == "action")
@@ -79,7 +82,16 @@ pub async fn power(
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     match d.power(&srv.id, action).await {
-        Ok(()) => Redirect::to(&format!("/servers/{id}")).into_response(),
+        Ok(()) => {
+            crate::perms::record(
+                &app.db,
+                &user.email,
+                "server.power",
+                &id,
+                &format!("{action:?}"),
+            );
+            Redirect::to(&format!("/servers/{id}")).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("power failed: {e:#} — <a href='/servers/{id}'>back</a>"),
@@ -100,14 +112,30 @@ pub async fn delete_server(
     headers: HeaderMap,
     Form(form): Form<DeleteForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
+    if !crate::perms::is_owner_or_admin(&app.db, &user, &srv) {
+        return (StatusCode::FORBIDDEN, "only the owner or an admin can delete this server")
+            .into_response();
+    }
     let purge = form.purge_data.as_deref() == Some("1");
     let res = d.remove_server(&srv.id, purge).await;
+    crate::perms::record(
+        &app.db,
+        &user.email,
+        "server.delete",
+        &srv.name,
+        &format!("{} (purge={})", srv.id, purge),
+    );
+    // clean up memberships
+    let _ = app.db.with(|c| {
+        c.execute("DELETE FROM user_servers WHERE server_id = ?1", rusqlite::params![srv.id])?;
+        Ok(())
+    });
     let _ = app.db.with(|c| {
         c.execute(
             "DELETE FROM servers WHERE id = ?1",
@@ -133,7 +161,7 @@ pub async fn ws_relay(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    if require_perm(&app, &headers, &id, "console").is_none() {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let (srv, d) = match daemon_for_server(&app, &id).await {
@@ -216,9 +244,9 @@ pub async fn file_download(
     Query(q): Query<PathOnlyQuery>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Some(path) = q.path else {
         return (StatusCode::BAD_REQUEST, "missing ?path").into_response();
     };
@@ -256,9 +284,9 @@ pub async fn files_mkdir(
     headers: HeaderMap,
     Form(form): Form<MkdirForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -266,6 +294,7 @@ pub async fn files_mkdir(
     if let Err(e) = d.mkdir(&srv.id, &path).await {
         return (StatusCode::BAD_GATEWAY, format!("mkdir failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "file.mkdir", &id, "");
     Redirect::to(&format!(
         "/servers/{id}/files?path={}",
         urlencoding::encode(&path)
@@ -284,15 +313,16 @@ pub async fn files_delete(
     headers: HeaderMap,
     Form(form): Form<DeleteFileForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     if let Err(e) = d.delete_path(&srv.id, &form.path).await {
         return (StatusCode::BAD_GATEWAY, format!("delete failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "file.delete", &id, "");
     Redirect::to(&format!(
         "/servers/{id}/files?path={}",
         urlencoding::encode(&parent_dir(&form.path))
@@ -306,9 +336,9 @@ pub async fn files_upload(
     headers: HeaderMap,
     mut mp: Multipart,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -346,6 +376,7 @@ pub async fn files_upload(
     if let Err(e) = d.write_file(&srv.id, &dest, data).await {
         return (StatusCode::BAD_GATEWAY, format!("upload failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "file.upload", &id, "");
     Redirect::to(&format!(
         "/servers/{id}/files?path={}",
         urlencoding::encode(&cwd)
@@ -365,9 +396,9 @@ pub async fn files_fetch(
     headers: HeaderMap,
     Form(form): Form<FetchFileForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -388,11 +419,14 @@ pub async fn files_fetch(
         }
     };
     match d.fetch_file(&srv.id, &form.url, &dest).await {
-        Ok(()) => Redirect::to(&format!(
-            "/servers/{id}/files?path={}",
-            urlencoding::encode(&parent_dir(&dest))
-        ))
-        .into_response(),
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "file.fetch", &id, "");
+            Redirect::to(&format!(
+                "/servers/{id}/files?path={}",
+                urlencoding::encode(&parent_dir(&dest))
+            ))
+            .into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("download failed: {e:#} — <a href='/servers/{id}/files'>back</a>"),
@@ -406,15 +440,16 @@ pub async fn sftp_reset(
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     if let Err(e) = d.sftp_reset(&srv.id).await {
         return (StatusCode::BAD_GATEWAY, format!("reset failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "sftp.reset", &id, "");
     Redirect::to(&format!("/servers/{id}/files")).into_response()
 }
 
@@ -440,9 +475,9 @@ pub async fn install_pack(
     headers: HeaderMap,
     mut mp: Multipart,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "modpacks") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -466,7 +501,10 @@ pub async fn install_pack(
     };
     tracing::info!(server = %srv.id, %fname, size = data.len(), "installing pack");
     match d.upload_pack(&srv.id, &fname, data).await {
-        Ok(()) => Redirect::to(&format!("/servers/{id}")).into_response(),
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "install.pack", &id, &fname);
+            Redirect::to(&format!("/servers/{id}")).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("install failed: {e:#} — <a href='/servers/{id}'>back</a>"),
@@ -482,14 +520,17 @@ pub async fn backup_create(
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "backups") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     match d.create_backup(&srv.id).await {
-        Ok(_) => Redirect::to(&format!("/servers/{id}")).into_response(),
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "backup.create", &id, "");
+            Redirect::to(&format!("/servers/{id}")).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("backup failed: {e:#} — <a href='/servers/{id}'>back</a>"),
@@ -509,15 +550,16 @@ pub async fn backup_delete(
     headers: HeaderMap,
     Form(form): Form<BidForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "backups") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     if let Err(e) = d.delete_backup(&srv.id, &form.bid).await {
         return (StatusCode::BAD_GATEWAY, format!("delete failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "backup.delete", &id, &form.bid);
     Redirect::to(&format!("/servers/{id}")).into_response()
 }
 
@@ -532,9 +574,9 @@ pub async fn backup_download(
     Query(q): Query<BackupDownloadQuery>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "backups") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Some(srv) = get_server(&app, &id) else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -586,9 +628,9 @@ pub async fn ai_diagnose(
     headers: HeaderMap,
     Form(form): Form<DiagnoseForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "ai") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -600,6 +642,7 @@ pub async fn ai_diagnose(
                 .chars()
                 .take(120)
                 .collect();
+            crate::perms::record(&app.db, &user.email, "ai.diagnose", &id, &short);
             Redirect::to(&format!(
                 "/servers/{}?error={}",
                 id,
@@ -621,14 +664,17 @@ pub async fn install_script_rerun(
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "modpacks") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     match d.rerun_install_script(&srv.id).await {
-        Ok(()) => Redirect::to(&format!("/servers/{id}/modpacks")).into_response(),
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "install.script_rerun", &id, "");
+            Redirect::to(&format!("/servers/{id}/modpacks")).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("install failed: {e:#} — <a href='/servers/{id}/modpacks'>back</a>"),
@@ -654,9 +700,9 @@ pub async fn schedule_add(
     headers: HeaderMap,
     Form(form): Form<ScheduleAddForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "schedules") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -664,7 +710,10 @@ pub async fn schedule_add(
         .schedule_add(&srv.id, &form.name, &form.cron, &form.action, form.payload.as_deref())
         .await
     {
-        Ok(_) => Redirect::to(&format!("/servers/{id}/schedules")).into_response(),
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "schedule.add", &id, &form.name);
+            Redirect::to(&format!("/servers/{id}/schedules")).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             format!("could not create schedule: {e:#} — <a href='/servers/{id}/schedules'>back</a>"),
@@ -685,9 +734,9 @@ pub async fn schedule_toggle(
     headers: HeaderMap,
     Form(form): Form<ScheduleToggleForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "schedules") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
@@ -695,6 +744,7 @@ pub async fn schedule_toggle(
     if let Err(e) = d.schedule_toggle(&srv.id, &form.tid, enabled).await {
         return (StatusCode::BAD_GATEWAY, format!("toggle failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "schedule.toggle", &id, &form.tid);
     Redirect::to(&format!("/servers/{id}/schedules")).into_response()
 }
 
@@ -709,14 +759,45 @@ pub async fn schedule_delete(
     headers: HeaderMap,
     Form(form): Form<ScheduleDeleteForm>,
 ) -> Response {
-    if require_login(&app, &headers).is_none() {
+    let Some(user) = require_perm(&app, &headers, &id, "schedules") else {
         return Redirect::to("/login").into_response();
-    }
+    };
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
     if let Err(e) = d.schedule_delete(&srv.id, &form.tid).await {
         return (StatusCode::BAD_GATEWAY, format!("delete failed: {e:#}")).into_response();
     }
+    crate::perms::record(&app.db, &user.email, "schedule.delete", &id, &form.tid);
     Redirect::to(&format!("/servers/{id}/schedules")).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub struct ScheduleRunForm {
+    pub tid: String,
+}
+
+pub async fn schedule_run(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<ScheduleRunForm>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "schedules") else {
+        return Redirect::to("/login").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    match d.schedule_run(&srv.id, &form.tid).await {
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "schedule.run", &id, &form.tid);
+            Redirect::to(&format!("/servers/{id}/schedules")).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            format!("run failed: {e:#} — <a href='/servers/{id}/schedules'>back</a>"),
+        )
+            .into_response(),
+    }
 }

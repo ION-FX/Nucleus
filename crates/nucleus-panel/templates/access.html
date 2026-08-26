@@ -1,0 +1,49 @@
+{% extends "server_shell.html" %}
+{% block title %}{{ shell.name }} · Access · Nucleus{% endblock %}
+{% block server_content %}
+<h1>Access &amp; permissions</h1>
+<section class="glass-panel">
+  <h2>Add member</h2>
+  <form method="post" action="/servers/{{ shell.id }}/access/add" class="stack">
+    <label>Email of existing user <input name="email" type="email" required placeholder="user@example.com"></label>
+    <fieldset class="perm-grid">
+      <legend>Permissions</legend>
+      {% for f in flags %}
+      <label class="inline"><input type="checkbox" name="{{ f }}" checked> {{ f }}</label>
+      {% endfor %}
+    </fieldset>
+    <button class="btn btn-primary">Grant access</button>
+  </form>
+</section>
+
+<section class="glass-panel">
+  <h2>Members</h2>
+  <p class="muted small">Owner: <strong>{{ owner_email }}</strong> (full control, implicit)</p>
+  <table class="table">
+    <thead><tr><th>User</th><th>Permissions</th><th></th></tr></thead>
+    <tbody>
+    {% for m in members %}
+      <tr>
+        <td class="strong">{{ m.email }}</td>
+        <td>
+          <form method="post" action="/servers/{{ shell.id }}/access/add" class="inline perm-edit">
+            <input type="hidden" name="email" value="{{ m.email }}">
+            {% for f in flags %}
+            <label class="inline"><input type="checkbox" name="{{ f }}" {% for p in m.perms %}{% if p == f %}checked{% endif %}{% endfor %}> {{ f }}</label>
+            {% endfor %}
+            <button class="btn btn-sm">Save</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/servers/{{ shell.id }}/access/remove">
+            <input type="hidden" name="user_id" value="{{ m.user_id }}">
+            <button class="btn btn-sm btn-danger">Remove</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if members.is_empty() %}<tr><td colspan="3" class="muted">No extra members yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

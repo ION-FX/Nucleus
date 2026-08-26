@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Account · Nucleus{% endblock %}
+{% block content %}
+<h1>Account</h1>
+<section class="glass-panel stack">
+  <p>Signed in as <strong>{{ user_email }}</strong>{% if is_admin %} <span class="chip green">administrator</span>{% endif %}</p>
+  {% if !message.is_empty() %}<p class="success">{{ message }}</p>{% endif %}
+  {% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+  <h2>Change password</h2>
+  <form method="post" action="/account" class="stack narrow">
+    <label>Current password <input name="current" type="password" required></label>
+    <label>New password <span class="muted">(8+ chars)</span> <input name="new" type="password" minlength="8" required></label>
+    <button class="btn btn-primary">Update password</button>
+  </form>
+  <p class="muted small">Changing your password signs out every other session.</p>
+</section>
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}

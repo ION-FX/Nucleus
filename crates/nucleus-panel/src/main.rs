@@ -4,6 +4,7 @@ mod daemon;
 mod db;
 mod eggs;
 mod models;
+mod perms;
 mod routes;
 
 use anyhow::Result;

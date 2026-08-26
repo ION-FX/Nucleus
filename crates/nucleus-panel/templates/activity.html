@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Activity · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Activity log</h1>
+<section class="glass-panel">
+<table class="table">
+  <thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="muted nowrap">{{ r.when }}</td>
+      <td>{{ r.email }}</td>
+      <td><code>{{ r.action }}</code></td>
+      <td>{{ r.target }}</td>
+      <td class="muted">{{ r.detail }}</td>
+    </tr>
+  {% endfor %}
+  {% if rows.is_empty() %}<tr><td colspan="5" class="muted">Nothing recorded yet.</td></tr>{% endif %}
+  </tbody>
+</table>
+</section>
+<p><a href="/admin/users">← Users</a> · <a href="/">Back to servers</a></p>
+{% endblock %}

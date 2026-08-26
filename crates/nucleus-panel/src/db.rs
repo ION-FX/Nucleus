@@ -52,6 +52,21 @@ impl Db {
                     json TEXT NOT NULL,
                     created_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS user_servers (
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    server_id TEXT NOT NULL REFERENCES servers(id),
+                    perms TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (user_id, server_id)
+                );
+                CREATE TABLE IF NOT EXISTS activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    email TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    detail TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity(ts DESC);
                 CREATE TABLE IF NOT EXISTS servers (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,

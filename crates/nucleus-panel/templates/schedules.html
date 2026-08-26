@@ -47,6 +47,10 @@
         <td class="muted">{{ t.next_run }}</td>
         <td class="muted small">{{ t.last_result }}</td>
         <td class="actions" style="justify-content:flex-end;">
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/run">
+            <input type="hidden" name="tid" value="{{ t.id }}">
+            <button class="btn btn-sm" title="run now, regardless of schedule">▶ Run now</button>
+          </form>
           <form class="inline" method="post" action="/servers/{{ shell.id }}/schedules/toggle">
             <input type="hidden" name="tid" value="{{ t.id }}">
             <input type="hidden" name="enabled" value="{% if t.enabled %}0{% else %}1{% endif %}">

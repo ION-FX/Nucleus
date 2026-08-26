@@ -90,6 +90,16 @@ pub fn router(app: SharedApp) -> axum::Router {
             "/admin/nodes/{id}/edit",
             post(admin::nodes_edit),
         )
+        .route("/admin/users", get(admin::users_page).post(admin::users_create))
+        .route("/admin/users/{id}/reset", post(admin::users_reset))
+        .route("/admin/users/{id}/role", post(admin::users_role_toggle))
+        .route("/admin/users/{id}/delete", post(admin::users_delete))
+        .route("/admin/activity", get(admin::activity_page))
+        .route("/account", get(pages::account_page).post(pages::account_password))
+        .route("/servers/{id}/access", get(pages::server_access))
+        .route("/servers/{id}/access/add", post(pages::access_add))
+        .route("/servers/{id}/access/remove", post(pages::access_remove))
+        .route("/servers/{id}/schedules/run", post(proxy::schedule_run))
         .route(
             "/admin/eggs",
             get(admin::eggs_page).post(admin::eggs_import),

@@ -295,3 +295,268 @@ pub async fn nodes_edit(
         .into_response(),
     }
 }
+
+
+// ---------- user management ----------
+
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub is_admin: bool,
+    pub created: String,
+    pub server_count: i64,
+}
+
+#[derive(Template)]
+#[template(path = "admin_users.html")]
+pub struct UsersTmpl {
+    pub users: Vec<UserRow>,
+    pub message: String,
+    pub message_class: String,
+    pub error: String,
+    pub me_email: String,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub async fn users_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (me_email, _) = nav_ctx(&app, &headers);
+    let rows: Vec<UserRow> = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                r#"SELECT u.id, u.email, u.role, u.created_at,
+                          (SELECT COUNT(*) FROM servers s WHERE s.owner_id = u.id)
+                   FROM users u ORDER BY u.created_at"#,
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .map(|(id, email, role, ts, cnt)| UserRow {
+                    id,
+                    email,
+                    is_admin: role == "admin",
+                    created: fmt_date(ts),
+                    server_count: cnt,
+                })
+                .collect();
+            Ok(rows)
+        })
+        .unwrap_or_default();
+    page(&UsersTmpl {
+        users: rows,
+        message: crate::routes::pages::query_msg(&headers),
+        message_class: "success".into(),
+        error: String::new(),
+        me_email,
+        user_email: String::new(),
+        is_admin: true,
+    })
+}
+
+fn fmt_date(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
+}
+
+fn msg_from_headers(headers: &HeaderMap) -> (String, String) {
+    let m = crate::routes::pages::query_msg_pub(headers);
+    (m.0, if m.1 { "error".into() } else { "success".into() })
+}
+
+#[derive(serde::Deserialize)]
+pub struct UserCreateForm {
+    pub email: String,
+    pub password: String,
+    #[serde(default)]
+    pub admin: Option<String>,
+}
+
+pub async fn users_create(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<UserCreateForm>,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let actor = crate::auth::Sessions::user_for(&app.db, &headers);
+    let email = form.email.trim().to_lowercase();
+    if !email.contains('@') || form.password.len() < 8 {
+        return Redirect::to("/admin/users?err=Valid%20email%20and%208%2B-char%20password%20required.").into_response();
+    }
+    let hash = match crate::auth::hash_password(&form.password) {
+        Ok(h) => h,
+        Err(_) => return Redirect::to("/admin/users?err=Hash%20failed.").into_response(),
+    };
+    let role = if form.admin.as_deref() == Some("1") { "admin" } else { "user" };
+    let res = app.db.with(|c| {
+        c.execute(
+            "INSERT INTO users (email, password_hash, role, created_at) VALUES (?1,?2,?3,?4)",
+            rusqlite::params![email, hash, role, chrono::Utc::now().timestamp()],
+        )?;
+        Ok(())
+    });
+    match res {
+        Ok(_) => {
+            if let Some(a) = actor {
+                crate::perms::record(&app.db, &a.email, "user.create", &email, &format!("role={role}"));
+            }
+            Redirect::to("/admin/users?msg=User%20created.").into_response()
+        }
+        Err(e) => Redirect::to(&format!(
+            "/admin/users?err={}",
+            urlencoding::encode(&format!("Create failed: {e} — email already taken?"))
+        ))
+        .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct UserResetForm {
+    pub password: String,
+}
+
+pub async fn users_reset(
+    State(app): State<SharedApp>,
+    AxumPath(uid): AxumPath<i64>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<UserResetForm>,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    if form.password.len() < 8 {
+        return Redirect::to("/admin/users?err=Password%20must%20be%208%2B%20chars.").into_response();
+    }
+    let hash = match crate::auth::hash_password(&form.password) {
+        Ok(h) => h,
+        Err(_) => return Redirect::to("/admin/users?err=Hash%20failed.").into_response(),
+    };
+    let _ = app.db.with(|c| {
+        c.execute(
+            "UPDATE users SET password_hash=?1 WHERE id=?2",
+            rusqlite::params![hash, uid],
+        )?;
+        // kick their sessions
+        c.execute("DELETE FROM sessions WHERE user_id=?1", rusqlite::params![uid])?;
+        Ok(())
+    });
+    if let Some(a) = crate::auth::Sessions::user_for(&app.db, &headers) {
+        crate::perms::record(&app.db, &a.email, "user.password_reset", &format!("uid {uid}"), "");
+    }
+    Redirect::to("/admin/users?msg=Password%20reset%20and%20sessions%20cleared.").into_response()
+}
+
+pub async fn users_role_toggle(
+    State(app): State<SharedApp>,
+    AxumPath(uid): AxumPath<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let me = crate::auth::Sessions::user_for(&app.db, &headers);
+    if me.as_ref().map(|u| u.role != "admin").unwrap_or(true) || me.as_ref().map(|u| u.id == uid).unwrap_or(false) {
+        return Redirect::to("/admin/users?err=Cannot%20change%20this%20account.").into_response();
+    }
+    let _ = app.db.with(|c| {
+        c.execute(
+            "UPDATE users SET role = CASE role WHEN 'admin' THEN 'user' ELSE 'admin' END WHERE id=?1",
+            rusqlite::params![uid],
+        )?;
+        Ok(())
+    });
+    if let Some(a) = me {
+        crate::perms::record(&app.db, &a.email, "user.role_toggle", &format!("uid {uid}"), "");
+    }
+    Redirect::to("/admin/users?msg=Role%20updated.").into_response()
+}
+
+pub async fn users_delete(
+    State(app): State<SharedApp>,
+    AxumPath(uid): AxumPath<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let me = crate::auth::Sessions::user_for(&app.db, &headers);
+    if me.as_ref().map(|u| u.role != "admin").unwrap_or(true) || me.as_ref().map(|u| u.id == uid).unwrap_or(false) {
+        return Redirect::to("/admin/users?err=Cannot%20delete%20yourself.").into_response();
+    }
+    let _ = app.db.with(|c| {
+        c.execute("DELETE FROM sessions WHERE user_id=?1", rusqlite::params![uid])?;
+        c.execute("DELETE FROM user_servers WHERE user_id=?1", rusqlite::params![uid])?;
+        // orphaned owned servers keep owner_id; set NULL so they remain visible to admins
+        c.execute("UPDATE servers SET owner_id=NULL WHERE owner_id=?1", rusqlite::params![uid])?;
+        c.execute("DELETE FROM users WHERE id=?1", rusqlite::params![uid])?;
+        Ok(())
+    });
+    if let Some(a) = me {
+        crate::perms::record(&app.db, &a.email, "user.delete", &format!("uid {uid}"), "");
+    }
+    Redirect::to("/admin/users?msg=User%20deleted.").into_response()
+}
+
+// ---------- activity log ----------
+
+pub struct ActivityRow {
+    pub when: String,
+    pub email: String,
+    pub action: String,
+    pub target: String,
+    pub detail: String,
+}
+
+#[derive(Template)]
+#[template(path = "activity.html")]
+pub struct ActivityTmpl {
+    pub rows: Vec<ActivityRow>,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub async fn activity_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (user_email, _) = nav_ctx(&app, &headers);
+    let rows: Vec<ActivityRow> = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT ts, email, action, target, detail FROM activity ORDER BY id DESC LIMIT 300",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
+                })?
+                .filter_map(|r| r.ok())
+                .map(|(ts, email, action, target, detail)| ActivityRow {
+                    when: chrono::DateTime::from_timestamp(ts, 0)
+                        .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                        .unwrap_or_default(),
+                    email,
+                    action,
+                    target,
+                    detail,
+                })
+                .collect();
+            Ok(rows)
+        })
+        .unwrap_or_default();
+    page(&ActivityTmpl { rows, user_email, is_admin: true })
+}

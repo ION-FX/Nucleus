@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Users · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Users</h1>
+{% if !message.is_empty() %}<p class="{{ message_class }}">{{ message }}</p>{% endif %}
+{% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+<section class="glass-panel">
+<form method="post" action="/admin/users" class="stack">
+  <div class="grid2">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Password <span class="muted">(8+ chars)</span> <input name="password" required></label>
+  </div>
+  <div>
+    <label class="inline"><input type="checkbox" name="admin" value="1"> administrator</label>
+  </div>
+  <button class="btn btn-primary">Create user</button>
+</form>
+</section>
+<table class="table">
+  <thead><tr><th>Email</th><th>Role</th><th>Servers owned</th><th>Created</th><th>Actions</th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td class="strong">{{ u.email }}{% if u.email == me_email %} <span class="chip blue">you</span>{% endif %}</td>
+      <td>{% if u.is_admin %}<span class="chip green">admin</span>{% else %}<span class="muted">user</span>{% endif %}</td>
+      <td>{{ u.server_count }}</td>
+      <td class="muted">{{ u.created }}</td>
+      <td>
+        <div class="inline-actions">
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/reset">
+            <input name="password" placeholder="new password" size="14" required>
+            <button class="btn btn-sm">Reset</button>
+          </form>
+          {% if u.email != me_email %}
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/role">
+            <button class="btn btn-sm">{% if u.is_admin %}Demote{% else %}Make admin{% endif %}</button>
+          </form>
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/delete">
+            <button class="btn btn-sm btn-danger">Delete</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p><a href="/">← Back to servers</a> · <a href="/admin/activity">Activity log →</a></p>
+{% endblock %}

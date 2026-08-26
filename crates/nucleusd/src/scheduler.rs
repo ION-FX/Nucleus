@@ -230,3 +230,21 @@ pub fn with_next_run(mut v: serde_json::Value, task: &Schedule) -> serde_json::V
     }
     v
 }
+
+/// Run a task immediately, regardless of its cron schedule.
+pub async fn run_now(
+    app: std::sync::Arc<crate::state::AppState>,
+    server_id: &str,
+    task_id: &str,
+) -> anyhow::Result<()> {
+    let sched = Scheduler { app };
+    let mut all = sched.load();
+    let Some(tasks) = all.get_mut(server_id) else {
+        anyhow::bail!("no schedules for this server");
+    };
+    let Some(mut task) = tasks.iter().find(|t| t.id == task_id).cloned() else {
+        anyhow::bail!("schedule not found");
+    };
+    execute(&sched, server_id, &mut task).await;
+    Ok(())
+}
