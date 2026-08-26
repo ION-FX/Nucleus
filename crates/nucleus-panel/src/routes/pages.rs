@@ -1,5 +1,7 @@
 use super::*;
 use crate::auth::{self, Sessions};
+use qrcode::QrCode;
+use qrcode::render::svg;
 use anyhow::Result;
 use askama::Template;
 use axum::extract::{Form, Multipart, Path as AxumPath, Query, State};
@@ -117,6 +119,14 @@ pub async fn login_post(
     if !auth::verify_password(&password, &hash) {
         return login_error(allow);
     }
+    let totp_on: bool = app
+        .db
+        .with(|c| Ok(c.query_row("SELECT COALESCE(totp_enabled,0) FROM users WHERE id=?1", rusqlite::params![id], |r| r.get::<_, i64>(0))?))
+        .unwrap_or(0) != 0;
+    if totp_on {
+        let ptoken = auth::create_pending_2fa(&app.db, id);
+        return redirect_with_cookie("/login/2fa", auth::Sessions::pending_cookie(&ptoken));
+    }
     match Sessions::create(&app.db, id) {
         Ok(token) => redirect_with_cookie("/", Sessions::session_cookie(&token)),
         Err(_) => login_error(allow),
@@ -127,35 +137,87 @@ pub async fn login_post(
 #[template(path = "register.html")]
 pub struct RegisterTmpl {
     pub error: String,
+    pub invite: String,
+    pub invited_email: String,
     pub user_email: String,
     pub is_admin: bool,
 }
 
-pub async fn register_get(State(app): State<SharedApp>) -> Response {
-    if !app.needs_bootstrap().unwrap_or(true) {
+pub async fn register_get(
+    State(app): State<SharedApp>,
+    Query(q): Query<InviteQuery>,
+) -> Response {
+    if !app.needs_bootstrap().unwrap_or(true) && q.invite.is_none() {
         return Redirect::to("/login").into_response();
     }
+    let invited_email: String = q
+        .invite
+        .as_ref()
+        .and_then(|tok| {
+            app.db
+                .with(|c| Ok(c.query_row("SELECT email FROM invites WHERE token=?1 AND used_at IS NULL", rusqlite::params![tok], |r| r.get(0)).ok()))
+            .ok().flatten()
+        })
+        .unwrap_or_default();
     page(&RegisterTmpl {
         error: String::new(),
+        invite: q.invite.clone().unwrap_or_default(),
+        invited_email,
         user_email: String::new(),
         is_admin: false,
     })
+}
+
+#[derive(serde::Deserialize)]
+pub struct InviteQuery {
+    pub invite: Option<String>,
 }
 
 pub async fn register_post(
     State(app): State<SharedApp>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    if !app.needs_bootstrap().unwrap_or(true) {
-        return Redirect::to("/login").into_response();
-    }
     let email = val(&form, "email").trim().to_lowercase();
     let password = val(&form, "password");
+    let invite = val(&form, "invite");
+
+    let role = if !invite.is_empty() {
+        let row: Option<(String, String)> = app
+            .db
+            .with(|c| {
+                Ok(c.query_row(
+                    "SELECT email, role FROM invites WHERE token=?1 AND used_at IS NULL",
+                    rusqlite::params![invite],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                ).ok())
+            })
+            .ok().flatten();
+        match row {
+            Some((inv_email, inv_role)) if inv_email == email => inv_role,
+            _ => {
+                return page(&RegisterTmpl {
+                    error: "Invite is invalid or already used for that email.".into(),
+                    user_email: String::new(),
+                    is_admin: false,
+                    invite: String::new(),
+                    invited_email: String::new(),
+                })
+            }
+        }
+    } else {
+        if !app.needs_bootstrap().unwrap_or(true) {
+            return Redirect::to("/login").into_response();
+        }
+        "admin".to_string()
+    };
+
     if email.is_empty() || password.len() < 8 {
         return page(&RegisterTmpl {
             error: "Email required and password must be at least 8 characters.".into(),
             user_email: String::new(),
             is_admin: false,
+            invite: String::new(),
+            invited_email: String::new(),
         });
     }
     let hash = match auth::hash_password(&password) {
@@ -165,18 +227,29 @@ pub async fn register_post(
                 error: "Failed to hash password.".into(),
                 user_email: String::new(),
                 is_admin: false,
+                invite: String::new(),
+                invited_email: String::new(),
             })
         }
     };
     let res = app.db.with(|c| {
         c.execute(
-            "INSERT INTO users (email, password_hash, role, created_at) VALUES (?1, ?2, 'admin', ?3)",
-            rusqlite::params![email, hash, chrono::Utc::now().timestamp()],
+            "INSERT INTO users (email, password_hash, role, created_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![email, hash, role, chrono::Utc::now().timestamp()],
         )?;
         Ok(c.last_insert_rowid())
     });
     match res {
         Ok(id) => {
+            if !invite.is_empty() {
+                let _ = app.db.with(|c| {
+                    c.execute(
+                        "UPDATE invites SET used_at=?1 WHERE token=?2",
+                        rusqlite::params![chrono::Utc::now().timestamp(), invite],
+                    )?;
+                    Ok(())
+                });
+            }
             let token = Sessions::create(&app.db, id).unwrap_or_default();
             redirect_with_cookie("/", Sessions::session_cookie(&token))
         }
@@ -184,6 +257,8 @@ pub async fn register_post(
             error: "Could not create account (maybe already exists).".into(),
             user_email: String::new(),
             is_admin: false,
+            invite: String::new(),
+            invited_email: String::new(),
         }),
     }
 }
@@ -1133,6 +1208,11 @@ fn shell_running_mem(form: &[(String, String)]) -> u64 {
 
 // settings page
 
+pub struct NodeOpt2 {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Template)]
 #[template(path = "settings.html")]
 pub struct SettingsTmpl {
@@ -1140,6 +1220,7 @@ pub struct SettingsTmpl {
     pub message: String,
     pub user_email: String,
     pub is_admin: bool,
+    pub nodes: Vec<NodeOpt2>,
 }
 
 pub async fn settings_page(
@@ -1148,12 +1229,18 @@ pub async fn settings_page(
     Query(q): Query<PageQueryMsg>,
     headers: HeaderMap,
 ) -> Result<Response, Response> {
-    let (shell, _srv, _daemon) = shell_guard(&app, &headers, &id, "settings").await?;
+    let (shell, srv, _daemon) = shell_guard(&app, &headers, &id, "settings").await?;
+    let nodes: Vec<NodeOpt2> = list_nodes(&app)
+        .into_iter()
+        .filter(|n| n.id != srv.node_id)
+        .map(|n| NodeOpt2 { id: n.id, name: n.name })
+        .collect();
     Ok(page(&SettingsTmpl {
         message: q.msg.clone().unwrap_or_default(),
         shell,
         user_email: nav_ctx(&app, &headers).0,
         is_admin: nav_ctx(&app, &headers).1,
+        nodes,
     }))
 }
 
@@ -1684,6 +1771,13 @@ pub async fn access_remove(
 
 // ---------- account page ----------
 
+pub struct ApiKeyView {
+    pub id: i64,
+    pub name: String,
+    pub created_at: String,
+    pub last_used: String,
+}
+
 #[derive(Template)]
 #[template(path = "account.html")]
 pub struct AccountTmpl {
@@ -1691,17 +1785,82 @@ pub struct AccountTmpl {
     pub is_admin: bool,
     pub message: String,
     pub error: String,
+    pub api_keys: Vec<ApiKeyView>,
+    pub totp_enabled: bool,
+    pub totp_setup: bool,
+    pub totp_secret: String,
+    pub totp_qr: String,
+    pub new_api_key: String,
 }
+
+
+fn load_account_err(app: &App, user: &User, msg: &str) -> AccountTmpl {
+    let mut t = load_account(app, user.id);
+    t.user_email = user.email.clone();
+    t.is_admin = user.role == "admin";
+    t.totp_enabled = user.totp_enabled;
+    t.error = msg.to_string();
+    t
+}
+
+fn load_account(app: &App, user_id: i64) -> AccountTmpl {
+    let keys: Vec<ApiKeyView> = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, name, created_at, last_used FROM api_keys WHERE user_id=?1 ORDER BY id DESC",
+            )?;
+            let rows = stmt
+                .query_map([user_id], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>();
+            Ok(rows)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, name, created, used)| ApiKeyView {
+            id,
+            name,
+            created_at: fmt_ts(created),
+            last_used: used.map(fmt_ts).unwrap_or_else(|| "never".into()),
+        })
+        .collect();
+    AccountTmpl {
+        user_email: String::new(),
+        is_admin: false,
+        message: String::new(),
+        error: String::new(),
+        api_keys: keys,
+        totp_enabled: false,
+        totp_setup: false,
+        totp_secret: String::new(),
+        totp_qr: String::new(),
+        new_api_key: String::new(),
+    }
+}
+
 
 pub async fn account_page(
     State(app): State<SharedApp>,
     headers: HeaderMap,
 ) -> Result<Response, Response> {
-    let (user_email, is_admin) = nav_ctx(&app, &headers);
-    if user_email.is_empty() {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
         return Err(Redirect::to("/login").into_response());
-    }
-    Ok(page(&AccountTmpl { user_email, is_admin, message: String::new(), error: String::new() }))
+    };
+    let mut t = load_account(&app, user.id);
+    t.user_email = user.email.clone();
+    t.is_admin = user.role == "admin";
+    t.totp_enabled = user.totp_enabled;
+    t.message = String::new();
+    t.error = String::new();
+    Ok(page(&t))
 }
 
 #[derive(serde::Deserialize)]
@@ -1735,6 +1894,12 @@ pub async fn account_password(
             user_email: user.email.clone(),
             is_admin: user.role == "admin",
             message: String::new(),
+            api_keys: Vec::new(),
+            totp_enabled: user.totp_enabled,
+            totp_setup: false,
+            totp_secret: String::new(),
+            totp_qr: String::new(),
+            new_api_key: String::new(),
             error: "Current password is incorrect.".into(),
         })
         .into_response();
@@ -1744,6 +1909,12 @@ pub async fn account_password(
             user_email: user.email.clone(),
             is_admin: user.role == "admin",
             message: String::new(),
+            api_keys: Vec::new(),
+            totp_enabled: user.totp_enabled,
+            totp_setup: false,
+            totp_secret: String::new(),
+            totp_qr: String::new(),
+            new_api_key: String::new(),
             error: "New password must be at least 8 characters.".into(),
         })
         .into_response();
@@ -1755,6 +1926,12 @@ pub async fn account_password(
                 user_email: user.email.clone(),
                 is_admin: user.role == "admin",
                 message: String::new(),
+                api_keys: Vec::new(),
+                totp_enabled: user.totp_enabled,
+                totp_setup: false,
+                totp_secret: String::new(),
+                totp_qr: String::new(),
+                new_api_key: String::new(),
                 error: format!("hash failed: {e}"),
             })
             .into_response()
@@ -1796,4 +1973,230 @@ pub fn query_msg_pub(headers: &HeaderMap) -> (String, bool) {
             urlencoding::decode(part).ok().map(|s| (s.replace('+', " "), err))
         })
         .unwrap_or_default()
+}
+
+// ---------- API keys ----------
+
+#[derive(serde::Deserialize)]
+pub struct ApiKeyForm {
+    pub name: String,
+}
+
+pub async fn apikey_create(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<ApiKeyForm>,
+) -> Response {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let name = form.name.trim().to_string();
+    if name.is_empty() {
+        return Redirect::to("/account?err=Name%20required").into_response();
+    }
+    let (raw, hash) = crate::auth::gen_api_key();
+    let res = app.db.with(|c| {
+        c.execute(
+            "INSERT INTO api_keys (user_id, name, key_hash, created_at) VALUES (?1,?2,?3,?4)",
+            rusqlite::params![user.id, name, hash, chrono::Utc::now().timestamp()],
+        )?;
+        Ok(())
+    });
+    let mut t = load_account(&app, user.id);
+    t.user_email = user.email.clone();
+    t.is_admin = user.role == "admin";
+    t.totp_enabled = user.totp_enabled;
+    match res {
+        Ok(()) => {
+            t.new_api_key = raw;
+            t.message = "API key created. Copy it now — it won't be shown again.".into();
+        }
+        Err(_) => t.error = "Could not create key.".into(),
+    }
+    page(&t).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub struct ApiKeyDeleteForm {
+    pub key_id: i64,
+}
+
+pub async fn apikey_delete(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<ApiKeyDeleteForm>,
+) -> Response {
+    let Some(user) = crate::auth::Sessions::user_for(&app.db, &headers) else {
+        return Redirect::to("/login").into_response();
+    };
+    let _ = app.db.with(|c| {
+        c.execute(
+            "DELETE FROM api_keys WHERE id=?1 AND user_id=?2",
+            rusqlite::params![form.key_id, user.id],
+        )?;
+        Ok(())
+    });
+    Redirect::to("/account").into_response()
+}
+
+// ---------- 2FA ----------
+
+#[derive(Template)]
+#[template(path = "login_2fa.html")]
+pub struct TwoFactorTmpl {
+    pub error: String,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub async fn login_2fa_get() -> Response {
+    page(&TwoFactorTmpl { error: String::new(), user_email: String::new(), is_admin: false })
+}
+
+pub async fn login_2fa_post(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let code = form.iter().find(|(k, _)| k == "code").map(|(_, v)| v.trim().to_string()).unwrap_or_default();
+    let token = auth::cookie_from(&headers, auth::Sessions::PENDING_2FA_COOKIE);
+    let Some(token) = token else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(uid) = auth::consume_pending_2fa(&app.db, &token) else {
+        return Redirect::to("/login").into_response();
+    };
+    let secret: Option<String> = app
+        .db
+        .with(|c| Ok(c.query_row("SELECT totp_secret FROM users WHERE id=?1", rusqlite::params![uid], |r| r.get(0)).ok()))
+        .ok()
+        .flatten();
+    let Some(secret) = secret else {
+        return Redirect::to("/login").into_response();
+    };
+    if !auth::totp_verify(&secret, &code) {
+        // re-issue a pending token so the user can retry
+        let ptoken = auth::create_pending_2fa(&app.db, uid);
+        return redirect_with_cookie(
+            "/login/2fa",
+            auth::Sessions::pending_cookie(&ptoken),
+        );
+    }
+    match Sessions::create(&app.db, uid) {
+        Ok(session) => redirect_with_cookie("/", Sessions::session_cookie(&session)),
+        Err(_) => Redirect::to("/login").into_response(),
+    }
+}
+
+#[derive(Template)]
+#[template(path = "account_2fa.html")]
+pub struct Account2faTmpl {
+    pub user_email: String,
+    pub is_admin: bool,
+    pub secret: String,
+    pub qr: String,
+    pub error: String,
+}
+
+pub async fn totp_setup_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let Some(user) = Sessions::user_for(&app.db, &headers) else {
+        return Err(Redirect::to("/login").into_response());
+    };
+    let secret: Option<String> = app
+        .db
+        .with(|c| Ok(c.query_row("SELECT totp_secret FROM users WHERE id=?1", rusqlite::params![user.id], |r| r.get(0)).ok()))
+        .ok()
+        .flatten();
+    let Some(secret) = secret else {
+        return Err(Redirect::to("/account").into_response());
+    };
+    let issuer = app.cfg.app_name.clone();
+    let uri = auth::totp_uri(&secret, &user.email, &issuer);
+    let qr = QrCode::new(uri)
+        .ok()
+        .map(|q| q.render::<svg::Color>().module_dimensions(8, 8).build())
+        .unwrap_or_default();
+    Ok(page(&Account2faTmpl {
+        user_email: user.email.clone(),
+        is_admin: user.role == "admin",
+        secret,
+        qr,
+        error: String::new(),
+    }))
+}
+
+pub async fn totp_enable(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let Some(user) = Sessions::user_for(&app.db, &headers) else {
+        return Err(Redirect::to("/login").into_response());
+    };
+    let secret = auth::totp_new_secret();
+    let _ = app.db.with(|c| {
+        c.execute(
+            "UPDATE users SET totp_secret=?1, totp_enabled=0 WHERE id=?2",
+            rusqlite::params![secret, user.id],
+        )?;
+        Ok(())
+    });
+    Ok(Redirect::to("/account/2fa/setup").into_response())
+}
+
+pub async fn totp_confirm(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Result<Response, Response> {
+    let Some(user) = Sessions::user_for(&app.db, &headers) else {
+        return Err(Redirect::to("/login").into_response());
+    };
+    let code = form.iter().find(|(k, _)| k == "code").map(|(_, v)| v.trim().to_string()).unwrap_or_default();
+    let secret: Option<String> = app
+        .db
+        .with(|c| Ok(c.query_row("SELECT totp_secret FROM users WHERE id=?1", rusqlite::params![user.id], |r| r.get(0)).ok()))
+        .ok()
+        .flatten();
+    match secret {
+        Some(secret) if auth::totp_verify(&secret, &code) => {
+            let _ = app.db.with(|c| {
+                c.execute("UPDATE users SET totp_enabled=1 WHERE id=?1", rusqlite::params![user.id])?;
+                Ok(())
+            });
+            crate::perms::record(&app.db, &user.email, "account.2fa_enable", &user.email, "");
+            Ok(Redirect::to("/account?msg=Two-factor%20enabled").into_response())
+        }
+        _ => Ok(Redirect::to("/account/2fa/setup?err=Invalid%20code").into_response()),
+    }
+}
+
+pub async fn totp_disable(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Result<Response, Response> {
+    let Some(user) = Sessions::user_for(&app.db, &headers) else {
+        return Err(Redirect::to("/login").into_response());
+    };
+    let current = form.iter().find(|(k, _)| k == "current").map(|(_, v)| v.clone()).unwrap_or_default();
+    let ok = app
+        .db
+        .with(|c| {
+            let hash: String = c.query_row("SELECT password_hash FROM users WHERE id=?1", rusqlite::params![user.id], |r| r.get(0))?;
+            Ok(hash)
+        })
+        .map(|h| auth::verify_password(&current, &h))
+        .unwrap_or(false);
+    if !ok {
+        return Ok(page(&load_account_err(&app, &user, "Current password is incorrect.")).into_response());
+    }
+    let _ = app.db.with(|c| {
+        c.execute("UPDATE users SET totp_enabled=0, totp_secret='' WHERE id=?1", rusqlite::params![user.id])?;
+        Ok(())
+    });
+    crate::perms::record(&app.db, &user.email, "account.2fa_disable", &user.email, "");
+    Ok(Redirect::to("/account?msg=Two-factor%20disabled").into_response())
 }

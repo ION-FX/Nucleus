@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Enable 2FA · Nucleus{% endblock %}
+{% block content %}
+<h1>Enable two-factor authentication</h1>
+<section class="glass-panel stack">
+  {% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+  <p class="muted">1. Scan this QR code with Google Authenticator, Authy, or similar:</p>
+  <div class="qr">{{qr|safe}}</div>
+  <p class="muted">Or enter this secret manually: <code>{{ secret }}</code></p>
+  <p class="muted">2. Confirm by entering a code generated from the app:</p>
+  <form method="post" action="/account/2fa/confirm" class="stack narrow">
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+    <button class="btn btn-primary">Confirm &amp; enable</button>
+  </form>
+  <p><a href="/account">Cancel</a></p>
+</section>
+{% endblock %}

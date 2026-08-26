@@ -560,3 +560,180 @@ pub async fn activity_page(
         .unwrap_or_default();
     page(&ActivityTmpl { rows, user_email, is_admin: true })
 }
+
+// ---------- invites ----------
+
+#[derive(Template)]
+#[template(path = "admin_invites.html")]
+pub struct InvitesTmpl {
+    pub message: String,
+    pub error: String,
+    pub invited_link: String,
+    pub invites: Vec<InviteView>,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub struct InviteView {
+    pub email: String,
+    pub role: String,
+    pub created: String,
+    pub token: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct InviteForm {
+    pub email: String,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+fn fmt_ts(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+fn load_invites(app: &App) -> Vec<InviteView> {
+    app.db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT email, role, created_at, token FROM invites WHERE used_at IS NULL ORDER BY created_at DESC",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>();
+            Ok(rows)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(email, role, created, token)| InviteView {
+            email,
+            role,
+            created: fmt_ts(created),
+            token,
+        })
+        .collect()
+}
+
+pub async fn invites_page(
+    State(app): State<SharedApp>,
+    Query(q): Query<AdminQuery>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (user_email, is_admin) = nav_ctx(&app, &headers);
+    let mut t = InvitesTmpl {
+        message: q.msg.clone().unwrap_or_default(),
+        error: q.err.clone().unwrap_or_default(),
+        invited_link: String::new(),
+        invites: load_invites(&app),
+        user_email,
+        is_admin,
+    };
+    if let Some(link) = q.msg.as_ref().and_then(|m| m.strip_prefix("link:")) {
+        t.invited_link = link.to_string();
+    }
+    page(&t)
+}
+
+pub async fn invites_create(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<InviteForm>,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let email = form.email.trim().to_lowercase();
+    if !email.contains('@') {
+        return Redirect::to("/admin/invites?err=Valid%20email%20required").into_response();
+    }
+    let role = if form.role.as_deref() == Some("admin") { "admin" } else { "user" };
+    let token = crate::auth::new_token();
+    let actor_email = crate::auth::Sessions::user_for(&app.db, &headers).map(|u| u.email).unwrap_or_default();
+    let res = app.db.with(|c| {
+        c.execute(
+            "INSERT INTO invites (token, email, role, invited_by, created_at) VALUES (?1,?2,?3,?4,?5)",
+            rusqlite::params![token, email, role, actor_email.clone(), chrono::Utc::now().timestamp()],
+        )?;
+        Ok(())
+    });
+    if res.is_err() {
+        return Redirect::to("/admin/invites?err=Could%20not%20create%20invite").into_response();
+    }
+    let link = format!("http://localhost:8025/register?invite={}", token);
+    // attempt to mail it if SMTP is configured
+    if let Some(smtp) = &app.cfg.smtp {
+        if let Ok(body) = build_invite_email(&email, &link, &app.cfg.app_name) {
+            if let Err(e) = send_invite_email(smtp, &email, &body).await {
+                tracing::warn!(error=%e, "failed to send invite email");
+            }
+        }
+    }
+    crate::perms::record(&app.db, &actor_email, "invite.create", &email, &role);
+    Redirect::to(&format!("/admin/invites?msg={}", urlencoding::encode(&format!("link:{link}")))).into_response()
+}
+
+pub async fn invites_revoke(
+    State(app): State<SharedApp>,
+    AxumPath(token): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let _ = app.db.with(|c| {
+        c.execute("DELETE FROM invites WHERE token=?1", rusqlite::params![token])?;
+        Ok(())
+    });
+    Redirect::to("/admin/invites").into_response()
+}
+
+fn build_invite_email(to: &str, link: &str, app_name: &str) -> anyhow::Result<String> {
+    Ok(format!(
+        "You've been invited to join {app_name}.\n\nCreate your account here:\n{link}\n\nThis invite can only be used once."
+    ))
+}
+
+async fn send_invite_email(
+    smtp: &crate::config::SmtpConfig,
+    to: &str,
+    body: &str,
+) -> anyhow::Result<()> {
+    use lettre::message::header::ContentType;
+    use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+    let from = smtp
+        .from
+        .parse::<lettre::message::Mailbox>()
+        .map_err(|e| anyhow::anyhow!("from address: {e}"))?;
+    let to_mb = to
+        .parse::<lettre::message::Mailbox>()
+        .map_err(|e| anyhow::anyhow!("to address: {e}"))?;
+    let email = Message::builder()
+        .from(from)
+        .to(to_mb)
+        .subject("You've been invited to Nucleus")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body.to_string())?;
+    let mailer = if smtp.tls {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp.host)?
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp.host)?
+    }
+    .port(smtp.port);
+    let mailer = if let (Some(u), Some(p)) = (smtp.user.as_ref(), smtp.password.as_ref()) {
+        use lettre::transport::smtp::authentication::Credentials;
+        mailer.credentials(Credentials::new(u.clone(), p.clone()))
+    } else {
+        mailer
+    }
+    .build();
+    mailer.send(email).await?;
+    Ok(())
+}

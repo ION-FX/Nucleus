@@ -1,3 +1,9 @@
+pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    let v = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let v = v.strip_prefix("Bearer ")?;
+    Some(v.to_string())
+}
+
 use super::pages::nav_ctx;
 use super::*;
 use crate::daemon::DaemonClient;
@@ -151,6 +157,90 @@ pub async fn delete_server(
         )
             .into_response(),
     }
+}
+
+// ---------- server transfer between nodes ----------
+
+#[derive(serde::Deserialize)]
+pub struct TransferForm {
+    pub target_node: String,
+}
+
+pub async fn transfer_server(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<TransferForm>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "settings") else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(srv) = get_server(&app, &id) else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    if form.target_node == srv.node_id {
+        return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode("Already on that node."))).into_response();
+    }
+    let Some(target) = get_node(&app, &form.target_node) else {
+        return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode("Unknown target node."))).into_response();
+    };
+    let src = DaemonClient::new(app.http.clone(), &get_node(&app, &srv.node_id).unwrap());
+    let dst = DaemonClient::new(app.http.clone(), &target);
+
+    // 1) stop the source container so we get a consistent snapshot.
+    let _ = src.power(&srv.id, nucleus_core::PowerAction::Stop).await;
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    // 2) make a backup on the source and pull the archive here.
+    let bid = match src.create_backup(&srv.id).await {
+        Ok(v) => v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        Err(e) => return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode(&format!("Snapshot failed: {e}")))).into_response(),
+    };
+    let bytes = match src.download_backup_bytes(&srv.id, &bid).await {
+        Ok(b) => b,
+        Err(e) => return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode(&format!("Transfer failed (download): {e}")))).into_response(),
+    };
+
+    // 3) recreate the server definition on the destination with the same id.
+    let env: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(&srv.env_json).unwrap_or_default();
+    let ports: Vec<nucleus_core::PortMapping> =
+        serde_json::from_str(&srv.ports_json).unwrap_or_default();
+    let spec = nucleus_core::CreateServerRequest {
+        id: srv.id.clone(),
+        name: srv.name.clone(),
+        image: srv.image.clone(),
+        startup: srv.startup.clone(),
+        env,
+        ports,
+        limits: nucleus_core::Limits { mem_mb: srv.mem_mb, cpu_cores: srv.cpu },
+        stop_command: srv.stop_command.clone(),
+        accept_eula: srv.accept_eula,
+        install_script: None,
+        installer_image: None,
+    };
+    if let Err(e) = dst.create_server(&spec).await {
+        // try to roll the source back up
+        let _ = src.power(&srv.id, nucleus_core::PowerAction::Start).await;
+        return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode(&format!("Dest create failed: {e}")))).into_response();
+    }
+
+    // 4) push the archive into the destination and extract it.
+    if let Err(e) = dst.upload_transfer(&srv.id, bytes.to_vec()).await {
+        let _ = src.power(&srv.id, nucleus_core::PowerAction::Start).await;
+        let _ = dst.remove_server(&srv.id, true).await;
+        return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode(&format!("Transfer failed (upload): {e}")))).into_response();
+    }
+
+    // 5) repoint the DB row and tear down the source.
+    let _ = app.db.with(|c| {
+        c.execute("UPDATE servers SET node_id=?1 WHERE id=?2", rusqlite::params![target.id, srv.id])?;
+        Ok(())
+    });
+    let _ = src.remove_server(&srv.id, true).await;
+
+    crate::perms::record(&app.db, &user.email, "server.transfer", &srv.id, &format!("to {}", target.name));
+    Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode("Server transferred."))).into_response()
 }
 
 // ---------- console websocket relay ----------
@@ -566,6 +656,37 @@ pub async fn backup_delete(
 #[derive(serde::Deserialize)]
 pub struct BackupDownloadQuery {
     pub bid: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct BackupRestoreForm {
+    pub bid: String,
+}
+
+pub async fn backup_restore(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    Form(form): Form<BackupRestoreForm>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "backups") else {
+        return Redirect::to("/login").into_response();
+    };
+    let bid = form.bid;
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    match d.restore_backup(&srv.id, &bid).await {
+        Ok(()) => {
+            crate::perms::record(&app.db, &user.email, "backup.restore", &id, &bid);
+            Redirect::to(&format!("/servers/{id}/backups")).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            format!("restore failed: {e:#} — <a href='/servers/{id}/backups'>back</a>"),
+        )
+            .into_response(),
+    }
 }
 
 pub async fn backup_download(

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Invites · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Email invites</h1>
+{% if !message.is_empty() %}<p class="success">{{ message }}</p>{% endif %}
+{% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+{% if !invited_link.is_empty() %}
+<section class="glass-panel">
+  <p>Share this single-use link:</p>
+  <code class="break">{{ invited_link }}</code>
+</section>
+{% endif %}
+<section class="glass-panel stack">
+  <h2>Invite a user</h2>
+  <form method="post" action="/admin/invites" class="stack narrow">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Role
+      <select name="role">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <button class="btn btn-primary">Send / create invite</button>
+  </form>
+  <p class="muted small">If SMTP is configured, an email is sent; otherwise copy the link above.</p>
+</section>
+<section class="glass-panel">
+  <h2>Pending invites</h2>
+  <table class="table tight">
+    <thead><tr><th>Email</th><th>Role</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+    {% for i in invites %}
+      <tr>
+        <td>{{ i.email }}</td>
+        <td>{{ i.role }}</td>
+        <td class="muted">{{ i.created }}</td>
+        <td class="actions"><form class="inline" method="post" action="/admin/invites/{{ i.token }}/delete"><button class="btn btn-sm btn-danger">Revoke</button></form></td>
+      </tr>
+    {% endfor %}
+    {% if invites.is_empty() %}<tr><td colspan="4" class="muted">No pending invites.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}

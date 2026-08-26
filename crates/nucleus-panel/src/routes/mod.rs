@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use std::sync::Arc;
 
 pub mod admin;
+pub mod api;
 pub mod pages;
 pub mod proxy;
 
@@ -37,6 +38,7 @@ pub fn router(app: SharedApp) -> axum::Router {
     axum::Router::new()
         .route("/", get(pages::dashboard))
         .route("/login", get(pages::login_get).post(pages::login_post))
+        .route("/login/2fa", get(pages::login_2fa_get).post(pages::login_2fa_post))
         .route(
             "/register",
             get(pages::register_get).post(pages::register_post),
@@ -77,6 +79,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/servers/{id}/install/script", post(proxy::install_script_rerun))
         .route("/servers/{id}/backups/create", post(proxy::backup_create))
         .route("/servers/{id}/backups/delete", post(proxy::backup_delete))
+        .route("/servers/{id}/backups/restore", post(proxy::backup_restore))
         .route(
             "/servers/{id}/backups/download",
             get(proxy::backup_download),
@@ -96,9 +99,18 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/admin/users/{id}/delete", post(admin::users_delete))
         .route("/admin/activity", get(admin::activity_page))
         .route("/account", get(pages::account_page).post(pages::account_password))
+        .route("/account/apikeys", post(pages::apikey_create))
+        .route("/account/apikeys/delete", post(pages::apikey_delete))
+        .route("/account/2fa/enable", post(pages::totp_enable))
+        .route("/account/2fa/setup", get(pages::totp_setup_page))
+        .route("/account/2fa/confirm", post(pages::totp_confirm))
+        .route("/account/2fa/disable", post(pages::totp_disable))
+        .route("/admin/invites", get(admin::invites_page).post(admin::invites_create))
+        .route("/admin/invites/{token}/delete", post(admin::invites_revoke))
         .route("/servers/{id}/access", get(pages::server_access))
         .route("/servers/{id}/access/add", post(pages::access_add))
         .route("/servers/{id}/access/remove", post(pages::access_remove))
+        .route("/servers/{id}/transfer", post(proxy::transfer_server))
         .route("/servers/{id}/schedules/run", post(proxy::schedule_run))
         .route(
             "/admin/eggs",
@@ -106,6 +118,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         )
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(app.clone())
+        .nest("/api/v1", api::router(app.clone()))
         .nest_service("/static", tower_http::services::ServeDir::new(static_dir))
 }
 

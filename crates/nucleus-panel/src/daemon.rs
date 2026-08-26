@@ -232,6 +232,42 @@ impl DaemonClient {
         ensure_ok(r).await
     }
 
+    /// Download a backup archive as raw bytes (used during node transfer).
+    pub async fn download_backup_bytes(&self, id: &str, bid: &str) -> Result<bytes::Bytes> {
+        let r = self
+            .req(Method::GET, &format!("/api/servers/{id}/backups/{bid}"))
+            .timeout(std::time::Duration::from_secs(600))
+            .send()
+            .await?;
+        let status = r.status();
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status}");
+        }
+        Ok(r.bytes().await.context("reading backup body")?)
+    }
+
+    /// Push a tar.gz archive (raw bytes) into the destination server's data dir.
+    pub async fn upload_transfer(&self, id: &str, data: Vec<u8>) -> Result<()> {
+        let r = self
+            .req(Method::PUT, &format!("/api/servers/{id}/transfer"))
+            .timeout(std::time::Duration::from_secs(600))
+            .body(data)
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
+
+    pub async fn restore_backup(&self, id: &str, bid: &str) -> Result<()> {
+        let r = self
+            .req(
+                Method::POST,
+                &format!("/api/servers/{id}/backups/{bid}/restore"),
+            )
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
+
     pub fn backup_download_url(&self, id: &str, bid: &str) -> String {
         format!("{}/api/servers/{id}/backups/{bid}", self.base)
     }

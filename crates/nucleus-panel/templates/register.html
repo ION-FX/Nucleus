@@ -1,17 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Create admin · Nucleus{% endblock %}
+{% block title %}{% if !invite.is_empty() %}Accept invite{% else %}Create admin{% endif %} · Nucleus{% endblock %}
 {% block nav %}{% endblock %}
 {% block content %}
 <div class="auth-card glass-panel">
   <h1><span class="orb">⚛</span> Nucleus</h1>
+  {% if !invite.is_empty() %}
+  <p class="tagline">You've been invited to join Nucleus.</p>
+  <p class="muted small">Joining as <strong>{{ invited_email }}</strong></p>
+  {% else %}
   <p class="tagline">Create the first administrator account.</p>
+  {% endif %}
   {% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
   <form method="post" action="/register">
+    {% if !invite.is_empty() %}<input type="hidden" name="invite" value="{{ invite }}">{% endif %}
     <label>Email</label>
-    <input type="email" name="email" required autofocus placeholder="you@example.com">
+    <input type="email" name="email" required autofocus placeholder="you@example.com" {% if !invited_email.is_empty() %}value="{{ invited_email }}"{% endif %}>
     <label>Password</label>
     <input type="password" name="password" minlength="8" required placeholder="min. 8 characters">
-    <button class="btn btn-primary btn-block">Create account</button>
+    <button class="btn btn-primary btn-block">{% if !invite.is_empty() %}Create account{% else %}Create admin account{% endif %}</button>
   </form>
 </div>
 {% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Two-factor · Nucleus{% endblock %}
+{% block content %}
+<h1>Two-factor authentication</h1>
+<section class="glass-panel stack narrow">
+  {% if !error.is_empty() %}<p class="error">{{ error }}</p>{% endif %}
+  <p class="muted">Enter the 6-digit code from your authenticator app.</p>
+  <form method="post" action="/login/2fa" class="stack">
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+    <button class="btn btn-primary">Verify</button>
+  </form>
+  <p class="muted small"><a href="/logout">Cancel</a></p>
+</section>
+{% endblock %}

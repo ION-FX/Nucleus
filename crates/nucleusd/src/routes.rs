@@ -74,6 +74,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/servers/{id}/backups/{bid}",
             get(download_backup).delete(delete_backup),
         )
+        .route(
+            "/servers/{id}/backups/{bid}/restore",
+            post(restore_backup_handler),
+        )
+        .route("/servers/{id}/transfer", put(transfer_apply))
         .route("/servers/{id}/ai/diagnose", post(ai_diagnose))
         .route("/servers/{id}/ai/incidents", get(ai_incidents))
         .route("/servers/{id}/sftp", get(sftp_info))
@@ -391,6 +396,38 @@ async fn download_backup(
 ) -> Response {
     match crate::backups::download_backup(state, id, bid).await {
         Ok(r) => r,
+        Err(e) => err(e),
+    }
+}
+
+
+async fn restore_backup_handler(
+    State(state): State<Arc<AppState>>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Response {
+    match crate::backups::restore_backup(state, id, bid).await {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(e) => err(e),
+    }
+}
+
+/// Receive a raw tar.gz archive and extract it into the server data dir.
+async fn transfer_apply(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    if !state.servers.contains_key(&id) {
+        return err(anyhow::anyhow!("unknown server {id}"));
+    }
+    if body.is_empty() {
+        return err(anyhow::anyhow!("empty body"));
+    }
+    let rt = state.get(&id).unwrap();
+    let dir = rt.server_dir(&state.cfg);
+    tokio::fs::create_dir_all(&dir).await.ok();
+    match crate::backups::extract_tar_gz(&dir, &body).await {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => err(e),
     }
 }

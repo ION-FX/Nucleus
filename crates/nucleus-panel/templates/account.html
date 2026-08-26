@@ -14,5 +14,44 @@
   </form>
   <p class="muted small">Changing your password signs out every other session.</p>
 </section>
+
+<section class="glass-panel stack">
+  <h2>API keys</h2>
+  <p class="muted small">Use these to script Nucleus over <code>/api/v1</code> with <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+  {% if !new_api_key.is_empty() %}
+    <p class="success">New key (save it now): <code>{{ new_api_key }}</code></p>
+  {% endif %}
+  <table class="table tight">
+    <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <tbody>
+    {% for k in api_keys %}
+      <tr>
+        <td>{{ k.name }}</td>
+        <td class="muted">{{ k.created_at }}</td>
+        <td class="muted">{{ k.last_used }}</td>
+        <td class="actions"><form class="inline" method="post" action="/account/apikeys/delete"><input type="hidden" name="key_id" value="{{ k.id }}"><button class="btn btn-sm btn-danger">Revoke</button></form></td>
+      </tr>
+    {% endfor %}
+    {% if api_keys.is_empty() %}<tr><td colspan="4" class="muted">No API keys yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+  <form method="post" action="/account/apikeys" class="inline">
+    <input name="name" placeholder="key name (e.g. deploy-bot)" size="24" required>
+    <button class="btn btn-sm btn-primary">Create key</button>
+  </form>
+</section>
+<section class="glass-panel stack">
+  <h2>Two-factor authentication</h2>
+  {% if totp_enabled %}
+    <p><span class="chip green">Enabled</span> A TOTP code is required at login.</p>
+    <form method="post" action="/account/2fa/disable" class="inline">
+      <input type="password" name="current" placeholder="current password" required>
+      <button class="btn btn-sm btn-danger">Disable 2FA</button>
+    </form>
+  {% else %}
+    <p class="muted small">Add a time-based one-time-password step (Google Authenticator, Authy, etc.) to login.</p>
+    <form method="post" action="/account/2fa/enable"><button class="btn btn-sm btn-primary">Enable 2FA</button></form>
+  {% endif %}
+</section>
 <p><a href="/">← Back to servers</a></p>
 {% endblock %}

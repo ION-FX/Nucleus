@@ -7,6 +7,7 @@ pub struct User {
     pub email: String,
     #[allow(dead_code)]
     pub role: String,
+    pub totp_enabled: bool,
 }
 
 #[derive(Debug, Clone)]

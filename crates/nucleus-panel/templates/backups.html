@@ -15,6 +15,7 @@
         <td class="muted">{{ b.created }}</td>
         <td class="actions" style="justify-content:flex-end;">
           <a class="btn btn-sm" href="{{ b.download_url }}">Download</a>
+          <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/restore"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm" title="Stop the server, then extract this backup over the data directory">Restore</button></form>
           <form class="inline" method="post" action="/servers/{{ shell.id }}/backups/delete"><input type="hidden" name="bid" value="{{ b.id }}"><button class="btn btn-sm btn-danger">Delete</button></form>
         </td>
       </tr>

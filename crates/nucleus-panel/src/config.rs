@@ -12,7 +12,25 @@ pub struct Config {
     pub static_dir: PathBuf,
     #[serde(default)]
     pub app_name: String,
+    #[serde(default)]
+    pub smtp: Option<SmtpConfig>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmtpConfig {
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    pub from: String,
+    #[serde(default)]
+    pub tls: bool,
+}
+
+fn default_smtp_port() -> u16 { 587 }
 
 fn default_bind() -> String {
     "0.0.0.0:8025".into()
@@ -33,6 +51,7 @@ impl Default for Config {
             database: PathBuf::from("/var/lib/nucleus/panel.db"),
             static_dir: default_static_dir(),
             app_name: "Nucleus".into(),
+            smtp: None,
         }
     }
 }

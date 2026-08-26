@@ -10,6 +10,19 @@
   </form>
   <p class="muted small" style="margin-top:14px;">Node: {{ shell.node_name }} · Image: {{ shell.image }}</p>
 </section>
+{% if !nodes.is_empty() %}
+<section class="glass-panel stack">
+  <h2 style="margin-top:0;">Transfer to another node</h2>
+  <p class="muted small">Stops the server, snapshots its files, recreates it on the chosen node and repoints the database. The source is removed on success.</p>
+  <form method="post" action="/servers/{{ shell.id }}/transfer" class="inline">
+    <select name="target_node" required>
+      {% for n in nodes %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-primary" onclick="return confirm('Transfer this server to another node?')">Transfer</button>
+  </form>
+</section>
+{% endif %}
+
 
 <section class="danger-zone">
   <h2 style="margin-top:0;">Danger zone</h2>

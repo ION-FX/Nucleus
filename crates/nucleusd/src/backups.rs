@@ -1,4 +1,72 @@
 use crate::state::AppState;
+
+/// Extract a gzip-compressed tar archive into `dir` (overwriting).
+pub async fn extract_tar_gz(dir: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Read;
+    let dir = dir.to_path_buf();
+    let bytes = bytes.to_vec();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let cursor = std::io::Cursor::new(bytes);
+        let dec = flate2::read::GzDecoder::new(cursor);
+        let mut tar = tar::Archive::new(dec);
+        tar.unpack(&dir).context("extracting archive")?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("join error {e}"))?
+}
+
+/// Remove every entry inside `dir` (but keep the directory itself).
+pub async fn clear_dir(dir: &std::path::Path) -> Result<()> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        if dir.exists() {
+            for ent in std::fs::read_dir(&dir)? {
+                let ent = ent?;
+                let p = ent.path();
+                if ent.file_type()?.is_dir() {
+                    std::fs::remove_dir_all(&p)?;
+                } else {
+                    std::fs::remove_file(&p)?;
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("join error {e}"))?;
+    Ok(())
+}
+
+pub async fn restore_backup(state: Arc<AppState>, id: String, bid: String) -> Result<()> {
+    if !bid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        anyhow::bail!("invalid backup id");
+    }
+    let rt = state.get(&id)?;
+    if rt.running.load(std::sync::atomic::Ordering::Relaxed) {
+        let _ = crate::docker::power(state.clone(), &id, nucleus_core::PowerAction::Kill, None).await;
+    }
+    let name = format!("nucleus-{id}");
+    let _ = state
+        .docker
+        .remove_container(
+            &name,
+            Some(bollard::container::RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+    let dir = rt.server_dir(&state.cfg);
+    tokio::fs::create_dir_all(&dir).await.ok();
+    clear_dir(&dir).await?;
+    let dest = backups_root(&state, &id).join(format!("{bid}.tar.gz"));
+    let bytes = tokio::fs::read(&dest).await.context("backup not found")?;
+    extract_tar_gz(&dir, &bytes).await?;
+    rt.push_log("[nucleus] backup restored; start the server to apply");
+    Ok(())
+}
+
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::http::StatusCode;

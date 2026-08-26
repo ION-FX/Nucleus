@@ -52,6 +52,21 @@ pub fn is_owner_or_admin(db: &Db, user: &User, srv: &ServerRow) -> bool {
     user.role == "admin" || srv.owner_id == Some(user.id)
 }
 
+/// True if the user can see the server at all (owner, admin, or any membership row).
+pub fn has_any_access(db: &Db, user: &User, srv: &ServerRow) -> bool {
+    if user.role == "admin" || srv.owner_id == Some(user.id) {
+        return true;
+    }
+    db.with(|c| {
+        let mut stmt = c.prepare(
+            "SELECT 1 FROM user_servers WHERE user_id=?1 AND server_id=?2",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![user.id, srv.id])?;
+        Ok(rows.next()?.is_some())
+    })
+    .unwrap_or(false)
+}
+
 pub fn record(db: &Db, email: &str, action: &str, target: &str, detail: &str) {
     let _ = db.with(|c| {
         c.execute(

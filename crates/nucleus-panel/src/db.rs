@@ -67,6 +67,28 @@ impl Db {
                     detail TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity(ts DESC);
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    last_used INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS invites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token TEXT UNIQUE NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    invited_by INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    used_at INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS pending_2fa (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS servers (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -94,6 +116,12 @@ impl Db {
                 .any(|name| name == "alias");
             if !has_alias {
                 c.execute("ALTER TABLE nodes ADD COLUMN alias TEXT NOT NULL DEFAULT ''", [])?;
+            }
+            for col in [
+                "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+                "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+            ] {
+                let _ = c.execute(col, []); // ignore if already present
             }
             Ok(())
         })
