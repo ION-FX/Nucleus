@@ -27,6 +27,10 @@ pub struct Limits {
     pub mem_mb: u64,
     #[serde(default)]
     pub cpu_cores: f64,
+    #[serde(default)]
+    pub disk_mb: u64,
+    #[serde(default)]
+    pub pids_limit: i64,
 }
 
 impl Default for Limits {
@@ -34,6 +38,8 @@ impl Default for Limits {
         Self {
             mem_mb: 2048,
             cpu_cores: 2.0,
+            disk_mb: 0,
+            pids_limit: 0,
         }
     }
 }

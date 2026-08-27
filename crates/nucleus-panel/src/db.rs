@@ -120,9 +120,17 @@ impl Db {
             for col in [
                 "ALTER TABLE users ADD COLUMN totp_secret TEXT",
                 "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE servers ADD COLUMN disk_mb INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE servers ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE servers ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
             ] {
                 let _ = c.execute(col, []); // ignore if already present
             }
+            // settings table for global defaults
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+                [],
+            )?;
             Ok(())
         })
     }

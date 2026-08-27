@@ -98,6 +98,8 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/admin/users/{id}/role", post(admin::users_role_toggle))
         .route("/admin/users/{id}/delete", post(admin::users_delete))
         .route("/admin/activity", get(admin::activity_page))
+        .route("/admin/activity/export", get(admin::activity_export))
+        .route("/admin/defaults", get(admin::defaults_page).post(admin::defaults_save))
         .route("/account", get(pages::account_page).post(pages::account_password))
         .route("/account/apikeys", post(pages::apikey_create))
         .route("/account/apikeys/delete", post(pages::apikey_delete))
@@ -112,6 +114,12 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/servers/{id}/access/remove", post(pages::access_remove))
         .route("/servers/{id}/transfer", post(proxy::transfer_server))
         .route("/servers/{id}/schedules/run", post(proxy::schedule_run))
+        .route("/servers/{id}/mods/search", get(proxy::mods_search))
+        .route("/servers/{id}/mods/install", post(proxy::mods_install))
+        .route("/servers/{id}/files/rename", post(proxy::files_rename))
+        .route("/servers/{id}/files/move", post(proxy::files_move))
+        .route("/servers/{id}/files/archive", post(proxy::files_archive))
+        .route("/servers/{id}/files/extract", post(proxy::files_extract))
         .route(
             "/admin/eggs",
             get(admin::eggs_page).post(admin::eggs_import),
@@ -181,7 +189,8 @@ pub fn get_server(app: &App, id: &str) -> Option<ServerRow> {
         .with(|c| {
             let mut stmt = c.prepare(
                 r#"SELECT id, name, node_id, egg_slug, image, startup, env_json,
-                          ports_json, mem_mb, cpu, stop_command, accept_eula, owner_id
+                          ports_json, mem_mb, cpu, disk_mb, pids_limit, tags,
+                          stop_command, accept_eula, owner_id
                    FROM servers WHERE id = ?1"#,
             )?;
             let row = stmt.query_map([id], map_server_row)?.next().transpose()?;
@@ -203,9 +212,12 @@ fn map_server_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRow> {
         ports_json: r.get(7)?,
         mem_mb: r.get::<_, i64>(8)? as u64,
         cpu: r.get(9)?,
-        stop_command: r.get(10)?,
-        accept_eula: r.get::<_, i64>(11)? != 0,
-        owner_id: r.get(12)?,
+        disk_mb: r.get::<_, i64>(10)? as u64,
+        pids_limit: r.get(11)?,
+        tags: r.get(12)?,
+        stop_command: r.get(13)?,
+        accept_eula: r.get::<_, i64>(14)? != 0,
+        owner_id: r.get(15)?,
     })
 }
 
@@ -214,7 +226,8 @@ pub fn list_servers(app: &App) -> Vec<ServerRow> {
         .with(|c| {
             let mut stmt = c.prepare(
                 r#"SELECT id, name, node_id, egg_slug, image, startup, env_json,
-                          ports_json, mem_mb, cpu, stop_command, accept_eula, owner_id
+                          ports_json, mem_mb, cpu, disk_mb, pids_limit, tags,
+                          stop_command, accept_eula, owner_id
                    FROM servers ORDER BY created_at DESC"#,
             )?;
             let rows = stmt

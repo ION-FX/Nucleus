@@ -274,6 +274,7 @@ pub async fn logout(State(app): State<SharedApp>, headers: HeaderMap) -> Respons
 #[template(path = "dashboard.html")]
 pub struct DashboardTmpl {
     pub servers: Vec<ServerCard>,
+    pub all_tags: Vec<String>,
     pub user_email: String,
     pub is_admin: bool,
 }
@@ -285,6 +286,7 @@ pub struct ServerCard {
     pub running: bool,
     pub status_class: String,
     pub status_text: String,
+    pub tags: String,
 }
 
 pub async fn dashboard(
@@ -354,10 +356,21 @@ pub async fn dashboard(
             running,
             status_class,
             status_text,
+            tags: s.tags.clone(),
         });
+    }
+    let mut tag_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for c in &cards {
+        for t in c.tags.split(',') {
+            let t = t.trim();
+            if !t.is_empty() {
+                tag_set.insert(t.to_string());
+            }
+        }
     }
     Ok(page(&DashboardTmpl {
         servers: cards,
+        all_tags: tag_set.into_iter().collect(),
         user_email,
         is_admin,
     }))
@@ -620,6 +633,8 @@ pub async fn server_create(
 
     let mem_mb = val(&form, "mem_mb").parse::<u64>().unwrap_or(2048).max(128);
     let cpu = val(&form, "cpu").parse::<f64>().unwrap_or(2.0).max(0.25);
+    let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
+    let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
 
     let rendered = nucleus_core::render_startup(&startup_tpl, &env);
 
@@ -644,6 +659,8 @@ pub async fn server_create(
         limits: nucleus_core::Limits {
             mem_mb,
             cpu_cores: cpu,
+            disk_mb,
+            pids_limit,
         },
         stop_command,
         accept_eula: val(&form, "accept_eula") == "1",
@@ -660,8 +677,9 @@ pub async fn server_create(
         .with(|c| {
             c.execute(
                 r#"INSERT INTO servers (id, name, node_id, egg_slug, image, startup, env_json,
-                       ports_json, mem_mb, cpu, stop_command, accept_eula, owner_id, created_at)
-                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"#,
+                       ports_json, mem_mb, cpu, disk_mb, pids_limit, tags,
+                       stop_command, accept_eula, owner_id, created_at)
+                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"#,
                 rusqlite::params![
                     spec.id,
                     spec.name,
@@ -677,6 +695,9 @@ pub async fn server_create(
                     serde_json::to_string(&spec.ports).unwrap_or_default(),
                     spec.limits.mem_mb as i64,
                     spec.limits.cpu_cores,
+                    spec.limits.disk_mb as i64,
+                    spec.limits.pids_limit,
+                    val(&form, "tags").trim().to_string(),
                     spec.stop_command,
                     spec.accept_eula as i64,
                     user.id,
@@ -1159,6 +1180,8 @@ pub async fn startup_save(
     let stop = opt_val(&form, "stop_command");
     let mem_mb = val(&form, "mem_mb").parse::<u64>().unwrap_or(shell_running_mem(&form));
     let cpu = val(&form, "cpu").parse::<f64>().unwrap_or(2.0);
+    let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
+    let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
 
     if image.is_empty() || startup.is_empty() {
         return Err((
@@ -1172,7 +1195,7 @@ pub async fn startup_save(
         "image": image,
         "startup": startup,
         "stop_command": stop,
-        "limits": {"mem_mb": mem_mb.max(128), "cpu_cores": cpu.max(0.25)},
+        "limits": {"mem_mb": mem_mb.max(128), "cpu_cores": cpu.max(0.25), "disk_mb": disk_mb, "pids_limit": pids_limit},
     });
     daemon
         .update_config(&shell.id, &body)
@@ -1188,8 +1211,8 @@ pub async fn startup_save(
     app.db
         .with(|c| {
             c.execute(
-                "UPDATE servers SET image=?1, startup=?2, stop_command=?3, mem_mb=?4, cpu=?5 WHERE id=?6",
-                rusqlite::params![image, startup, stop, mem_mb as i64, cpu, shell.id],
+                "UPDATE servers SET image=?1, startup=?2, stop_command=?3, mem_mb=?4, cpu=?5, disk_mb=?6, pids_limit=?7 WHERE id=?8",
+                rusqlite::params![image, startup, stop, mem_mb as i64, cpu, disk_mb as i64, pids_limit, shell.id],
             )?;
             Ok(())
         })
@@ -1221,6 +1244,11 @@ pub struct SettingsTmpl {
     pub user_email: String,
     pub is_admin: bool,
     pub nodes: Vec<NodeOpt2>,
+    pub mem_mb: u64,
+    pub cpu: f64,
+    pub disk_mb: u64,
+    pub pids_limit: i64,
+    pub tags: String,
 }
 
 pub async fn settings_page(
@@ -1241,6 +1269,11 @@ pub async fn settings_page(
         user_email: nav_ctx(&app, &headers).0,
         is_admin: nav_ctx(&app, &headers).1,
         nodes,
+        mem_mb: srv.mem_mb,
+        cpu: srv.cpu,
+        disk_mb: srv.disk_mb,
+        pids_limit: srv.pids_limit,
+        tags: srv.tags,
     }))
 }
 
@@ -1259,29 +1292,40 @@ pub async fn settings_save(
         )
             .into_response());
     }
+    let tags = val(&form, "tags").trim().to_string();
     let (shell, _srv, daemon) = shell_guard(&app, &headers, &id, "settings").await?;
+
+    let mem_mb = val(&form, "mem_mb").parse::<u64>().unwrap_or(2048).max(128);
+    let cpu = val(&form, "cpu").parse::<f64>().unwrap_or(2.0).max(0.25);
+    let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
+    let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
+
+    let body = serde_json::json!({
+        "name": new_name,
+        "limits": {"mem_mb": mem_mb, "cpu_cores": cpu, "disk_mb": disk_mb, "pids_limit": pids_limit},
+    });
     daemon
-        .update_config(&shell.id, &serde_json::json!({"name": new_name}))
+        .update_config(&shell.id, &body)
         .await
         .map_err(|e| {
             (
                 StatusCode::BAD_GATEWAY,
-                format!("rename failed: {e:#} — <a href='/servers/{id}/settings'>back</a>"),
+                format!("save failed: {e:#} — <a href='/servers/{id}/settings'>back</a>"),
             )
                 .into_response()
         })?;
     app.db
         .with(|c| {
             c.execute(
-                "UPDATE servers SET name=?1 WHERE id=?2",
-                rusqlite::params![new_name, shell.id],
+                "UPDATE servers SET name=?1, mem_mb=?2, cpu=?3, disk_mb=?4, pids_limit=?5, tags=?6 WHERE id=?7",
+                rusqlite::params![new_name, mem_mb as i64, cpu, disk_mb as i64, pids_limit, tags, shell.id],
             )?;
             Ok(())
         })
         .ok();
     Ok(Redirect::to(&format!(
         "/servers/{id}/settings?msg={}",
-        urlencoding::encode("Server renamed.")
+        urlencoding::encode("Settings saved. Restart to apply resource limits.")
     ))
     .into_response())
 }

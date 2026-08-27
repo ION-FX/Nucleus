@@ -2,6 +2,10 @@
 {% block title %}Activity · Nucleus Admin{% endblock %}
 {% block content %}
 <h1>Activity log</h1>
+<div class="actions" style="margin-bottom:12px;">
+  <a class="btn btn-sm" href="/admin/activity/export?format=csv">⬇ Export CSV</a>
+  <a class="btn btn-sm" href="/admin/activity/export?format=json">⬇ Export JSON</a>
+</div>
 <section class="glass-panel">
 <table class="table">
   <thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>

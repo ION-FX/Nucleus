@@ -6,6 +6,15 @@
   <a class="btn btn-primary" href="/servers/new">+ New server</a>
 </div>
 
+{% if !all_tags.is_empty() %}
+<div class="tag-filter" id="tag-filter">
+  <button class="tag-chip active" data-tag="">All</button>
+  {% for t in all_tags %}
+  <button class="tag-chip" data-tag="{{ t }}">{{ t }}</button>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if servers.is_empty() %}
 <section class="glass-panel empty-state">
   <p style="font-size:17px; margin:0 0 6px;">No servers yet</p>
@@ -13,9 +22,9 @@
 </section>
 {% endif %}
 
-<div class="server-grid">
+<div class="server-grid" id="server-grid">
   {% for s in servers %}
-  <div class="server-card glass-panel">
+  <div class="server-card glass-panel" data-tags="{{ s.tags }}">
     <div class="sc-head">
       <span class="dot {{ s.status_class }}"></span>
       <a class="strong sc-name" href="/servers/{{ s.id }}">{{ s.name }}</a>
@@ -26,6 +35,11 @@
       <span class="muted">· {{ s.node_name }}</span>
       {% if s.running %}<span class="live-stat muted small" data-srv="{{ s.id }}">…</span>{% endif %}
     </div>
+    {% if !s.tags.is_empty() %}
+    <div class="sc-tags">
+      {% for tag in s.tags.split(",") %}{% if !tag.trim().is_empty() %}<span class="srv-tag" data-tag="{{ tag.trim() }}">{{ tag.trim() }}</span>{% endif %}{% endfor %}
+    </div>
+    {% endif %}
     <div class="sc-actions">
       {% if s.running %}
       <form method="post" action="/servers/{{ s.id }}/power"><input type="hidden" name="action" value="stop"><button class="btn btn-sm">Stop</button></form>
@@ -38,4 +52,32 @@
   </div>
   {% endfor %}
 </div>
+<script>
+(function () {
+  var filterBtns = document.querySelectorAll(".tag-chip");
+  var cards = document.querySelectorAll(".server-card");
+  filterBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var tag = btn.dataset.tag;
+      filterBtns.forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      cards.forEach(function (card) {
+        var tags = (card.dataset.tags || "").toLowerCase();
+        if (!tag || tags.includes(tag.toLowerCase())) {
+          card.style.display = "";
+        } else {
+          card.style.display = "none";
+        }
+      });
+    });
+  });
+  document.querySelectorAll(".srv-tag").forEach(function (t) {
+    t.addEventListener("click", function () {
+      var tag = t.dataset.tag;
+      var btn = document.querySelector('.tag-chip[data-tag="' + tag + '"]');
+      if (btn) btn.click();
+    });
+  });
+})();
+</script>
 {% endblock %}

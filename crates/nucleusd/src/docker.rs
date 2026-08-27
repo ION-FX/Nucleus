@@ -58,16 +58,25 @@ async fn build_host_config(
     }
 
     let nano_cpus = (rt.spec.limits.cpu_cores * 1_000_000_000f64) as i64;
-    Ok((
-        bollard::secret::HostConfig {
-            binds: Some(binds),
-            port_bindings: Some(port_bindings),
-            memory: Some((rt.spec.limits.mem_mb.max(128) * 1024 * 1024) as i64),
-            nano_cpus: Some(nano_cpus),
-            ..Default::default()
-        },
-        exposed,
-    ))
+    let mut host_config = bollard::secret::HostConfig {
+        binds: Some(binds),
+        port_bindings: Some(port_bindings),
+        memory: Some((rt.spec.limits.mem_mb.max(128) * 1024 * 1024) as i64),
+        nano_cpus: Some(nano_cpus),
+        ..Default::default()
+    };
+    if rt.spec.limits.pids_limit > 0 {
+        host_config.pids_limit = Some(rt.spec.limits.pids_limit as i64);
+    }
+    if rt.spec.limits.disk_mb > 0 {
+        let mut storage_opt = std::collections::HashMap::new();
+        storage_opt.insert(
+            "size".to_string(),
+            format!("{}G", rt.spec.limits.disk_mb / 1024),
+        );
+        host_config.storage_opt = Some(storage_opt);
+    }
+    Ok((host_config, exposed))
 }
 
 pub async fn create_server(

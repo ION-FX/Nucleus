@@ -2,7 +2,7 @@ use super::pages::{nav_ctx, page};
 use super::*;
 use crate::daemon::DaemonClient;
 use askama::Template;
-use axum::extract::{Multipart, Path as AxumPath, Query, State};
+use axum::extract::{Form, Multipart, Path as AxumPath, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 
@@ -561,6 +561,82 @@ pub async fn activity_page(
     page(&ActivityTmpl { rows, user_email, is_admin: true })
 }
 
+pub async fn activity_export(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let format = q.get("format").cloned().unwrap_or_else(|| "csv".into());
+    let rows: Vec<(i64, String, String, String, String)> = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT ts, email, action, target, detail FROM activity ORDER BY id DESC LIMIT 10000",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })
+        .unwrap_or_default();
+
+    if format == "json" {
+        let json: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|(ts, email, action, target, detail)| {
+                serde_json::json!({
+                    "timestamp": chrono::DateTime::from_timestamp(ts, 0)
+                        .map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    "email": email,
+                    "action": action,
+                    "target": target,
+                    "detail": detail,
+                })
+            })
+            .collect();
+        let body = serde_json::to_string_pretty(&json).unwrap_or_else(|_| "[]".into());
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+            body,
+        )
+            .into_response()
+    } else {
+        let mut csv = String::from("timestamp,email,action,target,detail\n");
+        for (ts, email, action, target, detail) in &rows {
+            let when = chrono::DateTime::from_timestamp(*ts, 0)
+                .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                .unwrap_or_default();
+            csv.push_str(&format!(
+                "{},{},{},{},{}\n",
+                csv_escape(&when),
+                csv_escape(email),
+                csv_escape(action),
+                csv_escape(target),
+                csv_escape(detail),
+            ));
+        }
+        (
+            [(axum::http::header::CONTENT_TYPE, "text/csv".to_string())],
+            csv,
+        )
+            .into_response()
+    }
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 // ---------- invites ----------
 
 #[derive(Template)]
@@ -736,4 +812,86 @@ async fn send_invite_email(
     .build();
     mailer.send(email).await?;
     Ok(())
+}
+
+// ---------- admin defaults ----------
+
+#[derive(Template)]
+#[template(path = "admin_defaults.html")]
+pub struct DefaultsTmpl {
+    pub mem_mb: u64,
+    pub cpu: f64,
+    pub disk_mb: u64,
+    pub pids_limit: i64,
+    pub message: String,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+fn get_setting(app: &App, key: &str) -> Option<String> {
+    app.db
+        .with(|c| Ok(c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).ok()))
+        .ok()
+        .flatten()
+}
+
+fn set_setting(app: &App, key: &str, value: &str) {
+    let _ = app.db.with(|c| {
+        c.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    });
+}
+
+pub async fn defaults_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (user_email, _) = nav_ctx(&app, &headers);
+    let mem_mb = get_setting(&app, "default_mem_mb").and_then(|v| v.parse().ok()).unwrap_or(2048);
+    let cpu = get_setting(&app, "default_cpu").and_then(|v| v.parse().ok()).unwrap_or(2.0);
+    let disk_mb = get_setting(&app, "default_disk_mb").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let pids_limit = get_setting(&app, "default_pids_limit").and_then(|v| v.parse().ok()).unwrap_or(0);
+    page(&DefaultsTmpl {
+        mem_mb,
+        cpu,
+        disk_mb,
+        pids_limit,
+        message: String::new(),
+        user_email,
+        is_admin: true,
+    })
+}
+
+pub async fn defaults_save(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let mem_mb = crate::routes::pages::val(&form, "mem_mb").parse::<u64>().unwrap_or(2048).max(128);
+    let cpu = crate::routes::pages::val(&form, "cpu").parse::<f64>().unwrap_or(2.0).max(0.25);
+    let disk_mb = crate::routes::pages::val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
+    let pids_limit = crate::routes::pages::val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
+    set_setting(&app, "default_mem_mb", &mem_mb.to_string());
+    set_setting(&app, "default_cpu", &cpu.to_string());
+    set_setting(&app, "default_disk_mb", &disk_mb.to_string());
+    set_setting(&app, "default_pids_limit", &pids_limit.to_string());
+    let (user_email, _) = nav_ctx(&app, &headers);
+    page(&DefaultsTmpl {
+        mem_mb,
+        cpu,
+        disk_mb,
+        pids_limit,
+        message: "Defaults saved.".into(),
+        user_email,
+        is_admin: true,
+    })
 }

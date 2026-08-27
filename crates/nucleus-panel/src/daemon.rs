@@ -414,6 +414,33 @@ impl DaemonClient {
             .await?;
         parse(r).await
     }
+
+    pub async fn rename_path(&self, id: &str, body: &serde_json::Value) -> Result<()> {
+        let r = self
+            .req(Method::POST, &format!("/api/servers/{id}/files/rename"))
+            .json(body)
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
+
+    pub async fn archive(&self, id: &str, req: &crate::routes::proxy::ArchiveReq) -> Result<()> {
+        let r = self
+            .req(Method::POST, &format!("/api/servers/{id}/files/archive"))
+            .json(req)
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
+
+    pub async fn extract(&self, id: &str, req: &crate::routes::proxy::ArchiveReq) -> Result<()> {
+        let r = self
+            .req(Method::POST, &format!("/api/servers/{id}/files/extract"))
+            .json(req)
+            .send()
+            .await?;
+        ensure_ok(r).await
+    }
 }
 
 async fn ensure_ok(r: reqwest::Response) -> Result<()> {

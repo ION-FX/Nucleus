@@ -288,6 +288,68 @@ pub fn file_name_of(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
+#[derive(Deserialize)]
+pub struct ArchiveReq {
+    pub path: String,
+    #[serde(default)]
+    pub action: String,
+}
+
+pub async fn archive(
+    state: Arc<AppState>,
+    id: String,
+    req: ArchiveReq,
+) -> Result<StatusCode, ApiError> {
+    let root = server_root(&state, &id)?;
+    let target = safe_join(&root, &req.path)?;
+    ensure_inside(&root, &target)?;
+    if !target.exists() {
+        return Err(anyhow::anyhow!("path not found: {}", req.path).into());
+    }
+    let archive_path = if target.is_dir() {
+        let parent = target.parent().unwrap_or(&root);
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        parent.join(format!("{}.tar.gz", name))
+    } else {
+        let parent = target.parent().unwrap_or(&root);
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        parent.join(format!("{}.tar.gz", name))
+    };
+    let tar_gz = std::fs::File::create(&archive_path)
+        .map_err(|e| anyhow::anyhow!("create archive: {e}"))?;
+    let enc = flate2::write::GzEncoder::new(tar_gz, flate2::Compression::default());
+    let mut tar = tar::Builder::new(enc);
+    if target.is_dir() {
+        tar.append_dir_all(".", &target)
+            .map_err(|e| anyhow::anyhow!("tar: {e}"))?;
+    } else {
+        let name = target.file_name().unwrap_or_default().to_string_lossy().to_string();
+        tar.append_file(&name, &mut std::fs::File::open(&target).map_err(|e| anyhow::anyhow!("open: {e}"))?)
+            .map_err(|e| anyhow::anyhow!("tar file: {e}"))?;
+    }
+    tar.finish().map_err(|e| anyhow::anyhow!("finish tar: {e}"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn extract(
+    state: Arc<AppState>,
+    id: String,
+    req: ArchiveReq,
+) -> Result<StatusCode, ApiError> {
+    let root = server_root(&state, &id)?;
+    let target = safe_join(&root, &req.path)?;
+    ensure_inside(&root, &target)?;
+    if !target.exists() {
+        return Err(anyhow::anyhow!("archive not found: {}", req.path).into());
+    }
+    let dest_dir = target.parent().unwrap_or(&root);
+    let file = std::fs::File::open(&target).map_err(|e| anyhow::anyhow!("open: {e}"))?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut tar = tar::Archive::new(gz);
+    tar.unpack(dest_dir).map_err(|e| anyhow::anyhow!("extract: {e}"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Uniform API error type so handlers can use `?`.
 #[derive(Debug)]
 pub struct ApiError(pub anyhow::Error);

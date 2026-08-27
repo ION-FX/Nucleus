@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Defaults · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Default resource limits</h1>
+{% if !message.is_empty() %}<p class="success">{{ message }}</p>{% endif %}
+<section class="glass-panel">
+  <p class="muted small" style="margin-top:0;">These defaults are applied when a new server is created without explicit limits.</p>
+  <form method="post" action="/admin/defaults" class="stack" style="max-width:480px;">
+    <div class="grid2">
+      <label>Memory (MB) <input type="number" name="mem_mb" value="{{ mem_mb }}" min="128" step="128"></label>
+      <label>CPU cores <input type="number" name="cpu" value="{{ cpu }}" min="0.25" step="0.25"></label>
+      <label>Disk quota (MB, 0=unlimited) <input type="number" name="disk_mb" value="{{ disk_mb }}" min="0" step="512"></label>
+      <label>PID limit (0=unlimited) <input type="number" name="pids_limit" value="{{ pids_limit }}" min="0" step="100"></label>
+    </div>
+    <button class="btn btn-primary">Save defaults</button>
+  </form>
+</section>
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}

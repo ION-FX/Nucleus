@@ -213,7 +213,7 @@ pub async fn transfer_server(
         startup: srv.startup.clone(),
         env,
         ports,
-        limits: nucleus_core::Limits { mem_mb: srv.mem_mb, cpu_cores: srv.cpu },
+        limits: nucleus_core::Limits { mem_mb: srv.mem_mb, cpu_cores: srv.cpu, disk_mb: srv.disk_mb, pids_limit: srv.pids_limit },
         stop_command: srv.stop_command.clone(),
         accept_eula: srv.accept_eula,
         install_script: None,
@@ -455,7 +455,7 @@ pub async fn files_upload(
                     }
                 }
             }
-            _ => continue,
+            _ => {}
         }
     }
 
@@ -472,6 +472,214 @@ pub async fn files_upload(
         urlencoding::encode(&cwd)
     ))
     .into_response()
+}
+
+// ---------- mod browser (Modrinth) ----------
+
+pub async fn mods_search(
+    State(app): State<SharedApp>,
+    AxumPath(_id): AxumPath<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    if crate::auth::Sessions::user_for(&app.db, &headers).is_none() {
+        return (StatusCode::FORBIDDEN, "not logged in").into_response();
+    }
+    let query = q.get("q").cloned().unwrap_or_default();
+    let loader = q.get("loader").cloned().unwrap_or_else(|| "fabric".into());
+    let game = q.get("game").cloned().unwrap_or_else(|| "minecraft".into());
+
+    let url = format!(
+        "https://api.modrinth.com/v2/search?query={}&facets=[[\"project_type:mod\"],[\"categories:{}\"],[\"project_type:mod\"]]&limit=20",
+        urlencoding::encode(&query),
+        loader
+    );
+    let _ = game;
+
+    match app.http.get(&url).header("User-Agent", "Nucleus/1.0").send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "{}".into());
+            if status.is_success() {
+                (
+                    [(header::CONTENT_TYPE, "application/json".to_string())],
+                    body,
+                )
+                    .into_response()
+            } else {
+                (StatusCode::BAD_GATEWAY, format!("Modrinth API error: {status}")).into_response()
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("Modrinth request failed: {e}")).into_response(),
+    }
+}
+
+pub async fn mods_install(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ModInstallReq>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
+        return (StatusCode::FORBIDDEN, "no file permission").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+
+    // Fetch the project versions to find the latest file URL
+    let url = format!(
+        "https://api.modrinth.com/v2/project/{}/version?game_versions=[\"{}\"]&loaders=[\"{}\"]",
+        urlencoding::encode(&req.project_id),
+        urlencoding::encode(&req.game_version),
+        urlencoding::encode(&req.loader)
+    );
+    let resp = match app.http.get(&url).header("User-Agent", "Nucleus/1.0").send().await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("Modrinth request failed: {e}")).into_response(),
+    };
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("read failed: {e}")).into_response(),
+    };
+    let versions: Vec<serde_json::Value> = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("parse failed: {e}")).into_response(),
+    };
+    let Some(ver) = versions.first() else {
+        return (StatusCode::NOT_FOUND, "no compatible version found").into_response();
+    };
+    let files = ver.get("files").and_then(|f| f.as_array()).cloned().unwrap_or_default();
+    let Some(file) = files.first() else {
+        return (StatusCode::NOT_FOUND, "no file in version").into_response();
+    };
+    let dl_url = file.get("url").and_then(|u| u.as_str()).unwrap_or("");
+    let filename = file.get("filename").and_then(|f| f.as_str()).unwrap_or("mod.jar");
+    if dl_url.is_empty() {
+        return (StatusCode::NOT_FOUND, "no download URL").into_response();
+    }
+
+    let target_path = format!("/mods/{}", filename);
+    match d.fetch_file(&srv.id, dl_url, &target_path).await {
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "mod.install", &id, &filename);
+            axum::Json(serde_json::json!({"ok": true, "file": filename, "path": target_path})).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("install failed: {e:#}")).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct ModInstallReq {
+    pub project_id: String,
+    pub game_version: String,
+    pub loader: String,
+}
+
+// ---------- file manager extras ----------
+
+pub async fn files_rename(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<RenameReq>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
+        return (StatusCode::FORBIDDEN, "no file permission").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    let body = serde_json::json!({"from": req.from, "to": req.to});
+    match d.rename_path(&srv.id, &body).await {
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "file.rename", &id, &req.from);
+            axum::Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("rename failed: {e:#}")).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct RenameReq {
+    pub from: String,
+    pub to: String,
+}
+
+pub async fn files_move(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<MoveReq>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
+        return (StatusCode::FORBIDDEN, "no file permission").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    let body = serde_json::json!({"from": req.from, "to": req.to});
+    match d.rename_path(&srv.id, &body).await {
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "file.move", &id, &req.from);
+            axum::Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("move failed: {e:#}")).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct MoveReq {
+    pub from: String,
+    pub to: String,
+}
+
+pub async fn files_archive(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ArchiveReq>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
+        return (StatusCode::FORBIDDEN, "no file permission").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    match d.archive(&srv.id, &req).await {
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "file.archive", &id, &req.path);
+            axum::Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("archive failed: {e:#}")).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct ArchiveReq {
+    pub path: String,
+    pub action: String,
+}
+
+pub async fn files_extract(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ArchiveReq>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "files") else {
+        return (StatusCode::FORBIDDEN, "no file permission").into_response();
+    };
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    match d.extract(&srv.id, &req).await {
+        Ok(_) => {
+            crate::perms::record(&app.db, &user.email, "file.extract", &id, &req.path);
+            axum::Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("extract failed: {e:#}")).into_response(),
+    }
 }
 
 #[derive(serde::Deserialize)]

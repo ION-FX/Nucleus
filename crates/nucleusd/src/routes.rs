@@ -63,6 +63,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/files/delete", post(delete_path))
         .route("/servers/{id}/files/rename", post(rename_path))
         .route("/servers/{id}/files/fetch", post(fetch_file))
+        .route("/servers/{id}/files/archive", post(archive_path))
+        .route("/servers/{id}/files/extract", post(extract_path))
         .route("/servers/{id}/install/pack", post(install_pack))
         .route("/servers/{id}/install/script", post(rerun_script))
         .route("/servers/{id}/install/status", get(install_status))
@@ -345,6 +347,28 @@ async fn fetch_file(
     axum::Json(req): axum::Json<crate::files::FetchReq>,
 ) -> Response {
     match crate::files::fetch_file(state, id, req).await {
+        Ok(s) => s.into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn archive_path(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    axum::Json(req): axum::Json<crate::files::ArchiveReq>,
+) -> Response {
+    match crate::files::archive(state, id, req).await {
+        Ok(s) => s.into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn extract_path(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    axum::Json(req): axum::Json<crate::files::ArchiveReq>,
+) -> Response {
+    match crate::files::extract(state, id, req).await {
         Ok(s) => s.into_response(),
         Err(e) => e.into_response(),
     }
