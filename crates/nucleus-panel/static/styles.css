@@ -732,6 +732,32 @@ textarea.editor {
   color-scheme: dark;
 }
 
+[data-theme="aurora"] {
+  --bg-0: #07040f;
+  --bg-1: #0c0819;
+  --panel-under: rgba(22, 14, 40, 0.74);
+  --table-under: rgba(20, 13, 37, 0.72);
+  --input-bg: rgba(16, 10, 32, 0.6);
+  --input-focus-bg: rgba(24, 16, 46, 0.85);
+  --option-bg: #1b1338;
+  --log-bg: rgba(5, 2, 14, 0.72);
+  --radial-a: rgba(84, 42, 160, 0.45);
+  --radial-b: rgba(30, 58, 138, 0.45);
+  --blob-1: #6d28d9;
+  --blob-2: #2563eb;
+  --blob-3: #4338ca;
+  --blob-opacity: 0.34;
+  --accent: #a5b4fc;
+  --primary-a: #a78bfa;
+  --primary-b: #60a5fa;
+  --primary-hover-a: #bc9ffe;
+  --primary-hover-b: #7cb0fd;
+  --primary-contrast: #12091f;
+  --primary-glow: rgba(139, 131, 253, 0.45);
+  --orb-glow: rgba(167, 139, 250, 0.5);
+  color-scheme: dark;
+}
+
 [data-theme="abyss"] {
   --bg-0: #04101a;
   --bg-1: #061827;

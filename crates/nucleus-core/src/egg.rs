@@ -38,11 +38,6 @@ pub struct Egg {
 }
 
 #[derive(Debug, Deserialize)]
-struct PteroEggFile {
-    attributes: PteroEggAttr,
-}
-
-#[derive(Debug, Deserialize)]
 struct PteroEggAttr {
     name: String,
     #[serde(default)]
@@ -90,18 +85,28 @@ fn value_to_string(v: &Option<serde_json::Value>) -> String {
 }
 
 pub fn import_ptero_egg(json: &str) -> Result<Egg> {
-    let file: PteroEggFile =
+    let v: serde_json::Value =
         serde_json::from_str(json).context("not a valid Pterodactyl egg JSON")?;
-    let a = file.attributes;
+    // Accept both the Pterodactyl application-API envelope ({attributes:{…}})
+    // and the flat layout used by egg files in community repos (game-eggs).
+    let attrs = match (v.get("attributes"), v.get("name"), v.get("startup")) {
+        (Some(_), _, _) => &v["attributes"],
+        (_, Some(_), Some(_)) => &v,
+        _ => return Err(anyhow!("not a valid Pterodactyl egg JSON")),
+    };
+    let a: PteroEggAttr = serde_json::from_value(attrs.clone())
+        .context("invalid egg fields")?;
 
     let images: Vec<String> = match a.docker_images {
         serde_json::Value::Array(arr) => arr
             .iter()
             .filter_map(|v| v.as_str().map(str::to_owned))
+            .filter(|s| !s.is_empty())
             .collect(),
         serde_json::Value::Object(map) => map
-            .values()
+            .into_values()
             .filter_map(|v| v.as_str().map(str::to_owned))
+            .filter(|s| !s.is_empty())
             .collect(),
         _ => vec![],
     };
