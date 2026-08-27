@@ -100,6 +100,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/admin/activity", get(admin::activity_page))
         .route("/admin/activity/export", get(admin::activity_export))
         .route("/admin/defaults", get(admin::defaults_page).post(admin::defaults_save))
+        .route("/admin/update", get(admin::update_page).post(admin::update_perform))
         .route("/account", get(pages::account_page).post(pages::account_password))
         .route("/account/apikeys", post(pages::apikey_create))
         .route("/account/apikeys/delete", post(pages::apikey_delete))

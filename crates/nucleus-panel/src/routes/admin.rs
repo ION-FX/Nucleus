@@ -3,7 +3,7 @@ use super::*;
 use crate::daemon::DaemonClient;
 use askama::Template;
 use axum::extract::{Form, Multipart, Path as AxumPath, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 
 #[derive(Template)]
@@ -894,4 +894,336 @@ pub async fn defaults_save(
         user_email,
         is_admin: true,
     })
+}
+
+// ---------- updater ----------
+
+const REPO: &str = "ION-FX/Nucleus";
+
+pub fn current_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+pub fn current_commit() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+#[derive(serde::Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    assets: Vec<GhAsset>,
+}
+
+#[derive(serde::Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GhCommit {
+    sha: String,
+    #[serde(rename = "commit")]
+    commit: GhCommitInfo,
+}
+
+#[derive(serde::Deserialize)]
+struct GhCommitInfo {
+    committer: GhCommitter,
+    message: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GhCommitter {
+    date: String,
+}
+
+#[derive(Template)]
+#[template(path = "admin_update.html")]
+pub struct UpdateTmpl {
+    pub current_version: String,
+    pub current_commit: String,
+    pub latest_version: String,
+    pub latest_commit: String,
+    pub latest_date: String,
+    pub latest_msg: String,
+    pub update_available: bool,
+    pub release_url: String,
+    pub message: String,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub async fn update_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (user_email, _) = nav_ctx(&app, &headers);
+    let cur_ver = current_version();
+    let cur_commit = current_commit();
+
+    // Try GitHub releases first, then fall back to latest commit on main
+    let (latest_ver, latest_commit, latest_date, latest_msg, release_url) =
+        match check_github(&app).await {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::warn!(error = %e, "github check failed");
+                return page(&UpdateTmpl {
+                    current_version: cur_ver,
+                    current_commit: cur_commit,
+                    latest_version: "unavailable".into(),
+                    latest_commit: String::new(),
+                    latest_date: String::new(),
+                    latest_msg: format!("Could not reach GitHub: {e}"),
+                    update_available: false,
+                    release_url: String::new(),
+                    message: String::new(),
+                    user_email,
+                    is_admin: true,
+                });
+            }
+        };
+
+    let update_available = latest_commit != cur_commit && !latest_commit.is_empty();
+
+    page(&UpdateTmpl {
+        current_version: cur_ver,
+        current_commit: cur_commit,
+        latest_version: latest_ver,
+        latest_commit,
+        latest_date,
+        latest_msg,
+        update_available,
+        release_url,
+        message: String::new(),
+        user_email,
+        is_admin: true,
+    })
+}
+
+async fn check_github(
+    app: &App,
+) -> anyhow::Result<(String, String, String, String, String)> {
+    // Check releases
+    let resp = app
+        .http
+        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .header("User-Agent", "Nucleus-Updater")
+        .send()
+        .await?;
+
+    if resp.status().is_success() {
+        let release: GhRelease = resp.json().await?;
+        let tag = release.tag_name.clone();
+        // For releases, we still check the latest commit to determine if update is needed
+        let commit = fetch_latest_commit(app).await.unwrap_or_default();
+        return Ok((
+            tag,
+            commit.0,
+            commit.1,
+            format!("Release: {}", release.html_url),
+            release.html_url,
+        ));
+    }
+
+    // No releases — fall back to latest commit on main
+    let (sha, date, msg) = fetch_latest_commit_detail(app).await?;
+    Ok((
+        format!("dev ({})", &sha[..7.min(sha.len())]),
+        sha,
+        date,
+        msg,
+        format!("https://github.com/{REPO}/commits/main"),
+    ))
+}
+
+async fn fetch_latest_commit(app: &App) -> anyhow::Result<(String, String)> {
+    let resp = app
+        .http
+        .get(format!("https://api.github.com/repos/{REPO}/commits/main"))
+        .header("User-Agent", "Nucleus-Updater")
+        .send()
+        .await?;
+    let commit: GhCommit = resp.json().await?;
+    let sha = commit.sha[..7.min(commit.sha.len())].to_string();
+    let date = commit.commit.committer.date.clone();
+    Ok((sha, date))
+}
+
+async fn fetch_latest_commit_detail(app: &App) -> anyhow::Result<(String, String, String)> {
+    let resp = app
+        .http
+        .get(format!("https://api.github.com/repos/{REPO}/commits/main"))
+        .header("User-Agent", "Nucleus-Updater")
+        .send()
+        .await?;
+    let commit: GhCommit = resp.json().await?;
+    let sha = commit.sha[..7.min(commit.sha.len())].to_string();
+    let date = commit.commit.committer.date.clone();
+    let msg = commit.commit.message.lines().next().unwrap_or("").to_string();
+    Ok((sha, date, msg))
+}
+
+pub async fn update_perform(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+
+    let cur_exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("cannot find current exe: {e}")).into_response(),
+    };
+
+    // Try to download a release binary first
+    let release_resp = app
+        .http
+        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .header("User-Agent", "Nucleus-Updater")
+        .send()
+        .await;
+
+    let mut downloaded = false;
+    if let Ok(resp) = release_resp {
+        if resp.status().is_success() {
+            if let Ok(release) = resp.json::<GhRelease>().await {
+                // Find a linux x86_64 binary asset
+                let asset = release.assets.iter().find(|a| {
+                    a.name.contains("linux")
+                        && (a.name.contains("x86_64") || a.name.contains("amd64"))
+                }).or_else(|| release.assets.iter().find(|a| a.name.ends_with(".tar.gz") || a.name.ends_with(".zip")));
+
+                if let Some(asset) = asset {
+                    tracing::info!(url = %asset.browser_download_url, "downloading release binary");
+                    match app.http.get(&asset.browser_download_url)
+                        .header("User-Agent", "Nucleus-Updater")
+                        .send().await
+                    {
+                        Ok(r) if r.status().is_success() => {
+                            let bytes = match r.bytes().await {
+                                Ok(b) => b,
+                                Err(e) => return (StatusCode::BAD_GATEWAY, format!("download body failed: {e}")).into_response(),
+                            };
+                            if let Err(e) = write_and_replace(&cur_exe, &bytes) {
+                                return (StatusCode::INTERNAL_SERVER_ERROR, format!("replace failed: {e}")).into_response();
+                            }
+                            downloaded = true;
+                        }
+                        Ok(r) => return (StatusCode::BAD_GATEWAY, format!("download HTTP {}", r.status())).into_response(),
+                        Err(e) => return (StatusCode::BAD_GATEWAY, format!("download failed: {e}")).into_response(),
+                    }
+                }
+            }
+        }
+    }
+
+    // If no release binary, do a git pull + cargo build
+    if !downloaded {
+        tracing::info!("no release binary, falling back to git pull + cargo build");
+        let repo_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        let git_pull = std::process::Command::new("git")
+            .args(["pull", "origin", "main"])
+            .current_dir(&repo_dir)
+            .output();
+
+        match git_pull {
+            Ok(o) if o.status.success() => {
+                tracing::info!("git pull succeeded");
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("git pull failed: {stderr}")).into_response();
+            }
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("git not available: {e}")).into_response();
+            }
+        }
+
+        let cargo_build = std::process::Command::new("cargo")
+            .args(["build", "--release", "-p", "nucleus-panel", "-p", "nucleusd"])
+            .current_dir(&repo_dir)
+            .output();
+
+        match cargo_build {
+            Ok(o) if o.status.success() => {
+                tracing::info!("cargo build succeeded");
+                // Copy the new binary over the current one
+                let new_bin = repo_dir.join("target/release/nucleus-panel");
+                if new_bin.exists() {
+                    if let Err(e) = std::fs::copy(&new_bin, &cur_exe) {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, format!("copy failed: {e}")).into_response();
+                    }
+                }
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("cargo build failed: {stderr}")).into_response();
+            }
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("cargo not available: {e}")).into_response();
+            }
+        }
+    }
+
+    // Restart: spawn the new binary and exit
+    let args: Vec<String> = std::env::args().collect();
+    let config = args.iter().find(|a| a.starts_with("--config=")).cloned()
+        .or_else(|| {
+            // --config <path> form
+            args.windows(2).find(|w| w[0] == "--config").map(|w| w[1].clone())
+        });
+
+    let mut cmd = std::process::Command::new(&cur_exe);
+    let config_path = config.clone().unwrap_or_else(|| "/etc/nucleus/panel.toml".into());
+    if let Some(cfg) = config {
+        cmd.arg("--config").arg(cfg);
+    }
+    let _ = cmd; // unused for now, we use sh script
+
+    // Spawn a restart helper that waits 1s then execs the new binary
+    let exe_str = cur_exe.to_string_lossy().to_string();
+    let script = format!(
+        "sleep 1 && exec {} --config {}",
+        exe_str,
+        config_path
+    );
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    tracing::info!("update complete, restarting");
+    std::process::exit(0);
+}
+
+fn write_and_replace(exe: &std::path::Path, data: &[u8]) -> anyhow::Result<()> {
+    let tmp = exe.with_extension("new");
+    std::fs::write(&tmp, data)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, exe)?;
+    Ok(())
 }

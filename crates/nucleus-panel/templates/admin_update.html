@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Update · Nucleus Admin{% endblock %}
+{% block content %}
+<h1>Update Nucleus</h1>
+{% if !message.is_empty() %}<p class="success">{{ message }}</p>{% endif %}
+
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Version information</h2>
+  <table class="table tight" style="max-width:680px;">
+    <tbody>
+      <tr>
+        <td class="muted" style="width:180px;">Current version</td>
+        <td><strong>{{ current_version }}</strong> <span class="muted small">(commit {{ current_commit }})</span></td>
+      </tr>
+      <tr>
+        <td class="muted">Latest on GitHub</td>
+        <td>
+          <strong>{{ latest_version }}</strong>
+          {% if !latest_commit.is_empty() %}<span class="muted small">(commit {{ latest_commit }})</span>{% endif %}
+        </td>
+      </tr>
+      {% if !latest_date.is_empty() %}
+      <tr>
+        <td class="muted">Published</td>
+        <td class="muted">{{ latest_date }}</td>
+      </tr>
+      {% endif %}
+      {% if !latest_msg.is_empty() %}
+      <tr>
+        <td class="muted">Latest commit</td>
+        <td>{{ latest_msg }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</section>
+
+{% if update_available %}
+<section class="glass-panel" style="border-color: rgba(76,212,149,0.3);">
+  <h2 style="margin-top:0; color: var(--green);">Update available</h2>
+  <p>Your Nucleus installation is <strong>{{ latest_commit }}</strong> behind the latest version on GitHub.</p>
+  <p class="muted small">The updater will download the latest release binary (if available) or perform a <code>git pull</code> + <code>cargo build --release</code>, then restart the panel automatically.</p>
+  <form method="post" action="/admin/update" onsubmit="return confirm('Update Nucleus now? The panel will restart automatically.')">
+    <button class="btn btn-primary">⬆ Update now</button>
+  </form>
+</section>
+{% else %}
+{% if !latest_commit.is_empty() %}
+<section class="glass-panel">
+  <h2 style="margin-top:0;">Up to date</h2>
+  <p class="muted">You're running the latest version of Nucleus.</p>
+  {% if !release_url.is_empty() %}<p><a href="{{ release_url }}" target="_blank">View on GitHub →</a></p>{% endif %}
+</section>
+{% endif %}
+{% endif %}
+
+<p><a href="/">← Back to servers</a></p>
+{% endblock %}
