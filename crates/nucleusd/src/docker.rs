@@ -26,6 +26,35 @@ pub async fn pull_image(docker: &bollard::Docker, image: &str) -> Result<()> {
     Ok(())
 }
 
+/// Pterodactyl-style built-in environment for a server container: egg
+/// variables plus SERVER_MEMORY / SERVER_IP / SERVER_PORT derived from the
+/// spec (games and install scripts expect these to always be present).
+pub(crate) fn container_env(spec: &nucleus_core::CreateServerRequest) -> Vec<String> {
+    let mut env: Vec<String> = spec
+        .env
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    if !spec.env.contains_key("SERVER_MEMORY") {
+        env.push(format!("SERVER_MEMORY={}", spec.limits.mem_mb));
+    }
+    if !spec.env.contains_key("SERVER_IP") {
+        env.push("SERVER_IP=0.0.0.0".to_string());
+    }
+    if !spec.env.contains_key("SERVER_PORT") {
+        if let Some(p) = spec.ports.first() {
+            env.push(format!("SERVER_PORT={}", p.container));
+        }
+    }
+    env
+}
+
+/// Startups created before built-in substitution existed may contain an
+/// empty `-XmxM` artifact; repair it from the server's memory limit.
+fn sanitize_startup(startup: &str, mem_mb: u64) -> String {
+    startup.replace("-XmxM", &format!("-Xmx{mem_mb}M"))
+}
+
 async fn build_host_config(
     state: &AppState,
     rt: &ServerRuntime,
@@ -147,14 +176,8 @@ pub async fn create_server(
     let config = bollard::container::Config {
         image: Some(rt.spec.image.clone()),
         entrypoint: Some(vec!["/bin/bash".into(), "-c".into()]),
-        cmd: Some(vec![rt.spec.startup.clone()]),
-        env: Some(
-            rt.spec
-                .env
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect(),
-        ),
+        cmd: Some(vec![sanitize_startup(&rt.spec.startup, rt.spec.limits.mem_mb)]),
+        env: Some(container_env(&rt.spec)),
         tty: Some(false),
         open_stdin: Some(true),
         attach_stdin: Some(true),
@@ -433,14 +456,11 @@ pub async fn power(
                 let cfg = bollard::container::Config {
                     image: Some(rt.spec.image.clone()),
                     entrypoint: Some(vec![shell.to_string(), "-c".into()]),
-                    cmd: Some(vec![rt.spec.startup.clone()]),
-                    env: Some(
-                        rt.spec
-                            .env
-                            .iter()
-                            .map(|(k, v)| format!("{k}={v}"))
-                            .collect(),
-                    ),
+                    cmd: Some(vec![sanitize_startup(
+                        &rt.spec.startup,
+                        rt.spec.limits.mem_mb,
+                    )]),
+                    env: Some(container_env(&rt.spec)),
                     tty: Some(false),
                     open_stdin: Some(true),
                     attach_stdin: Some(true),

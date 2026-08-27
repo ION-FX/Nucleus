@@ -2,10 +2,49 @@
   "attributes": {
     "name": "Vanilla Minecraft",
     "description": "Mojang vanilla server. Download server.jar via Files > Download from URL (or attach a modpack at creation).",
-    "docker_images": { "Java 21": "ghcr.io/pterodactyl/yolks:java_21" },
+    "docker_images": {
+      "Java 21": "ghcr.io/pterodactyl/yolks:java_21"
+    },
     "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
     "variables": [
-      { "name": "Server jar file", "env_variable": "SERVER_JARFILE", "default_value": "server.jar", "description": "The jar to run. Fetch it with Files > Download from URL.", "user_editable": true, "required": true }
-    ]
-  }
+      {
+        "name": "Server jar file",
+        "env_variable": "SERVER_JARFILE",
+        "default_value": "server.jar",
+        "description": "The jar to run. Fetch it with Files > Download from URL.",
+        "user_editable": true,
+        "required": true
+      },
+      {
+        "name": "MC_VERSION",
+        "env_variable": "MC_VERSION",
+        "description": "Minecraft version to install, or 'latest'",
+        "default_value": "latest",
+        "user_editable": true,
+        "required": false
+      }
+    ],
+    "scripts": {
+      "installation": {
+        "script": "#!/bin/bash\n# Vanilla Minecraft install script. Server files: /mnt/server\napt-get update -qq; apt-get install -yqq curl jq ca-certificates\nmkdir -p /mnt/server\ncd /mnt/server\n\nif [ -f \"$SERVER_JARFILE\" ]; then rm -f \"$SERVER_JARFILE\"; fi\n\nMANIFEST=$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json)\nif [ -z \"$MC_VERSION\" ] || [ \"$MC_VERSION\" = \"latest\" ]; then\n    MC_VERSION=$(echo \"$MANIFEST\" | jq -r '.latest.release')\nfi\necho \"installing vanilla Minecraft ${MC_VERSION}\"\n\nVER_URL=$(echo \"$MANIFEST\" | jq -r \".versions[] | select(.id==\\\\\"$MC_VERSION\\\\\") | .url\")\nif [ -z \"$VER_URL\" ]; then\n    echo \"unknown Minecraft version: ${MC_VERSION}\"\n    exit 1\nfi\nJAR_URL=$(curl -s \"$VER_URL\" | jq -r '.downloads.server.url')\ncurl -sSLo \"$SERVER_JARFILE\" \"$JAR_URL\"\n\necho \"download complete\"\n",
+        "container": "ghcr.io/ptero-eggs/installers:debian"
+      }
+    }
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\n# Vanilla Minecraft install script. Server files: /mnt/server\napt-get update -qq; apt-get install -yqq curl jq ca-certificates\nmkdir -p /mnt/server\ncd /mnt/server\n\nif [ -f \"$SERVER_JARFILE\" ]; then rm -f \"$SERVER_JARFILE\"; fi\n\nMANIFEST=$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json)\nif [ -z \"$MC_VERSION\" ] || [ \"$MC_VERSION\" = \"latest\" ]; then\n    MC_VERSION=$(echo \"$MANIFEST\" | jq -r '.latest.release')\nfi\necho \"installing vanilla Minecraft ${MC_VERSION}\"\n\nVER_URL=$(echo \"$MANIFEST\" | jq -r \".versions[] | select(.id==\\\"$MC_VERSION\\\") | .url\")\nif [ -z \"$VER_URL\" ]; then\n    echo \"unknown Minecraft version: ${MC_VERSION}\"\n    exit 1\nfi\nJAR_URL=$(curl -s \"$VER_URL\" | jq -r '.downloads.server.url')\ncurl -sSLo \"$SERVER_JARFILE\" \"$JAR_URL\"\n\necho \"download complete\"\n",
+      "container": "ghcr.io/ptero-eggs/installers:debian"
+    }
+  },
+  "variables": [
+    {
+      "name": "MC_VERSION",
+      "env_variable": "MC_VERSION",
+      "description": "Minecraft version to install, or 'latest'",
+      "default_value": "latest",
+      "user_editable": true,
+      "required": false
+    }
+  ]
 }

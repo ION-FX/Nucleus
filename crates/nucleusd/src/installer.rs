@@ -734,12 +734,7 @@ async fn run_oneoff(
         ]),
         ..Default::default()
     };
-    let env: Vec<String> = rt
-        .spec
-        .env
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect();
+    let env: Vec<String> = crate::docker::container_env(&rt.spec);
     let cfg = bollard::container::Config {
         image: Some(image.unwrap_or_else(|| rt.spec.image.clone())),
         entrypoint: Some(vec!["/bin/bash".into(), "-c".into()]),

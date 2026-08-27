@@ -636,6 +636,14 @@ pub async fn server_create(
     let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
     let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
 
+    // Pterodactyl-style built-ins — always derived from server config so
+    // templates like `-Xmx{{SERVER_MEMORY}}M` never render empty.
+    env.insert("SERVER_MEMORY".to_string(), mem_mb.to_string());
+    env.insert("SERVER_IP".to_string(), "0.0.0.0".to_string());
+    if let Some(p) = ports.first() {
+        env.insert("SERVER_PORT".to_string(), p.container.to_string());
+    }
+
     let rendered = nucleus_core::render_startup(&startup_tpl, &env);
 
     // Attach the egg's install script (sidecar-executed on the node).
