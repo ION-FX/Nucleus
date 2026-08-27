@@ -116,6 +116,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/servers/{id}/transfer", post(proxy::transfer_server))
         .route("/servers/{id}/schedules/run", post(proxy::schedule_run))
         .route("/servers/{id}/mods/search", get(proxy::mods_search))
+        .route("/servers/{id}/mods/versions", get(proxy::mods_versions))
         .route("/servers/{id}/mods/install", post(proxy::mods_install))
         .route("/servers/{id}/files/rename", post(proxy::files_rename))
         .route("/servers/{id}/files/move", post(proxy::files_move))

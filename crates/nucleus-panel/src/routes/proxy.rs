@@ -487,16 +487,33 @@ pub async fn mods_search(
     }
     let query = q.get("q").cloned().unwrap_or_default();
     let loader = q.get("loader").cloned().unwrap_or_else(|| "fabric".into());
-    let game = q.get("game").cloned().unwrap_or_else(|| "minecraft".into());
+    let gv = q.get("game_version").cloned().unwrap_or_default();
 
-    let url = format!(
-        "https://api.modrinth.com/v2/search?query={}&facets=[[\"project_type:mod\"],[\"categories:{}\"],[\"project_type:mod\"]]&limit=20",
-        urlencoding::encode(&query),
-        loader
-    );
-    let _ = game;
+    let mut facets = vec![
+        "\"project_type:mod\"".to_string(),
+        format!("\"categories:{}\"", loader),
+    ];
+    if !gv.is_empty() && gv != "*" {
+        facets.push(format!("\"versions:{}\"", gv));
+    }
+    let facets_json = format!("[{}]", facets
+        .iter()
+        .map(|f| format!("[{f}]"))
+        .collect::<Vec<_>>()
+        .join(","));
 
-    match app.http.get(&url).header("User-Agent", "Nucleus/1.0").send().await {
+    match app
+        .http
+        .get("https://api.modrinth.com/v2/search")
+        .header("User-Agent", "Nucleus/1.0")
+        .query(&[
+            ("query", query.as_str()),
+            ("facets", facets_json.as_str()),
+            ("limit", "20"),
+        ])
+        .send()
+        .await
+    {
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_else(|_| "{}".into());
@@ -509,6 +526,50 @@ pub async fn mods_search(
             } else {
                 (StatusCode::BAD_GATEWAY, format!("Modrinth API error: {status}")).into_response()
             }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("Modrinth request failed: {e}")).into_response(),
+    }
+}
+
+pub async fn mods_versions(
+    State(app): State<SharedApp>,
+    AxumPath(_id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    if crate::auth::Sessions::user_for(&app.db, &headers).is_none() {
+        return (StatusCode::FORBIDDEN, "not logged in").into_response();
+    }
+    match app
+        .http
+        .get("https://api.modrinth.com/v2/tag/game_version")
+        .header("User-Agent", "Nucleus/1.0")
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                return (StatusCode::BAD_GATEWAY, format!("Modrinth API error: {}", resp.status())).into_response();
+            }
+            #[derive(serde::Deserialize)]
+            struct GhVersion {
+                version: String,
+                version_type: String,
+            }
+            let all: Vec<GhVersion> = match resp.json().await {
+                Ok(v) => v,
+                Err(e) => return (StatusCode::BAD_GATEWAY, format!("parse failed: {e}")).into_response(),
+            };
+            // release versions only, newest first (API already returns them sorted)
+            let releases: Vec<serde_json::Value> = all
+                .into_iter()
+                .filter(|v| v.version_type == "release")
+                .map(|v| serde_json::json!({"version": v.version}))
+                .collect();
+            (
+                [(header::CONTENT_TYPE, "application/json".to_string())],
+                serde_json::to_string(&releases).unwrap_or_else(|_| "[]".into()),
+            )
+                .into_response()
         }
         Err(e) => (StatusCode::BAD_GATEWAY, format!("Modrinth request failed: {e}")).into_response(),
     }
@@ -527,12 +588,19 @@ pub async fn mods_install(
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
 
-    // Fetch the project versions to find the latest file URL
+    // Fetch the project versions to find the latest file URL.
+    // Omit filters the user didn't pick so we always get a result when possible.
+    let mut params: Vec<String> = Vec::new();
+    if !req.game_version.is_empty() && req.game_version != "*" {
+        params.push(format!("game_versions=[\"{}\"]", urlencoding::encode(&req.game_version)));
+    }
+    if !req.loader.is_empty() && req.loader != "*" {
+        params.push(format!("loaders=[\"{}\"]", urlencoding::encode(&req.loader)));
+    }
     let url = format!(
-        "https://api.modrinth.com/v2/project/{}/version?game_versions=[\"{}\"]&loaders=[\"{}\"]",
+        "https://api.modrinth.com/v2/project/{}/version{}",
         urlencoding::encode(&req.project_id),
-        urlencoding::encode(&req.game_version),
-        urlencoding::encode(&req.loader)
+        if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) }
     );
     let resp = match app.http.get(&url).header("User-Agent", "Nucleus/1.0").send().await {
         Ok(r) => r,

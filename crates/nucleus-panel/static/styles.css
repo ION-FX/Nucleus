@@ -1172,3 +1172,17 @@ textarea.editor {
 }
 .mod-item:last-child { border-bottom: none; }
 .mod-info p { margin: 2px 0; }
+.mod-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--hairline);
+  background: var(--subtle-bg);
+}
+.mod-icon.ph {
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+}

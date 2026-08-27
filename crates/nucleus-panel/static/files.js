@@ -173,28 +173,60 @@
 
   // mod browser
   var modBrowser = document.getElementById("mod-browser");
-  document.getElementById("btn-mods").addEventListener("click", function () { modBrowser.hidden = !modBrowser.hidden; if (!modBrowser.hidden) document.getElementById("mod-search").focus(); });
+  var gversLoaded = false;
+  document.getElementById("btn-mods").addEventListener("click", function () {
+    modBrowser.hidden = !modBrowser.hidden;
+    if (!modBrowser.hidden) { loadGameVersions(); document.getElementById("mod-search").focus(); }
+  });
   document.getElementById("mod-close").addEventListener("click", function () { modBrowser.hidden = true; });
   document.getElementById("mod-search-btn").addEventListener("click", searchMods);
   document.getElementById("mod-search").addEventListener("keydown", function (e) { if (e.key === "Enter") searchMods(); });
 
+  function esc(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function loadGameVersions() {
+    if (gversLoaded) return;
+    fetch("/servers/" + SID + "/mods/versions")
+      .then(function (r) { return r.json(); })
+      .then(function (list) {
+        var sel = document.getElementById("mod-gamever");
+        list.forEach(function (v) {
+          var o = document.createElement("option");
+          o.value = v.version;
+          o.textContent = v.version;
+          sel.appendChild(o);
+        });
+        gversLoaded = true;
+      })
+      .catch(function () {});
+  }
+
   function searchMods() {
     var q = document.getElementById("mod-search").value.trim();
     var loader = document.getElementById("mod-loader").value;
+    var gv = document.getElementById("mod-gamever").value;
     if (!q) return;
     var results = document.getElementById("mod-results");
     results.innerHTML = '<p class="muted">Searching…</p>';
-    fetch("/servers/" + SID + "/mods/search?q=" + encodeURIComponent(q) + "&loader=" + loader)
+    fetch("/servers/" + SID + "/mods/search?q=" + encodeURIComponent(q) +
+      "&loader=" + encodeURIComponent(loader) +
+      (gv ? "&game_version=" + encodeURIComponent(gv) : ""))
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var hits = data.hits || [];
-        if (!hits.length) { results.innerHTML = '<p class="muted">No mods found.</p>'; return; }
+        if (!hits.length) { results.innerHTML = '<p class="muted">No mods found' + (gv ? " for " + esc(gv) : "") + '.</p>'; return; }
         results.innerHTML = hits.map(function (h) {
+          var icon = h.icon_url
+            ? '<img class="mod-icon" src="' + esc(h.icon_url) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;mod-icon ph&quot;>📦</div>\'">'
+            : '<div class="mod-icon ph">📦</div>';
           return '<div class="mod-item">' +
-            '<div class="mod-info"><strong>' + (h.title || h.slug) + '</strong>' +
-            '<p class="muted small">' + (h.description || "").substring(0, 120) + '</p>' +
-            '<p class="muted small">⬇ ' + (h.downloads || 0) + ' · ' + (h.project_type || "mod") + '</p></div>' +
-            '<button class="btn btn-sm btn-primary mod-install" data-pid="' + h.project_id + '">Install</button>' +
+            icon +
+            '<div class="mod-info"><strong>' + esc(h.title || h.slug) + '</strong>' +
+            '<p class="muted small">' + esc((h.description || "").substring(0, 120)) + '</p>' +
+            '<p class="muted small">⬇ ' + (h.downloads || 0) + ' · ' + esc(h.author || "") + '</p></div>' +
+            '<button class="btn btn-sm btn-primary mod-install" data-pid="' + esc(h.project_id) + '">Install</button>' +
             '</div>';
         }).join("");
         document.querySelectorAll(".mod-install").forEach(function (btn) {
@@ -204,10 +236,14 @@
             fetch("/servers/" + SID + "/mods/install", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ project_id: btn.dataset.pid, game_version: "*", loader: document.getElementById("mod-loader").value }),
-            }).then(function (r) { return r.json(); }).then(function (r) {
+              body: JSON.stringify({
+                project_id: btn.dataset.pid,
+                game_version: document.getElementById("mod-gamever").value,
+                loader: loader,
+              }),
+            }).then(function (r) { return r.json().catch(function () { return {}; }); }).then(function (r) {
               if (r.ok) { btn.textContent = "✓ Installed"; toast("Mod installed to /mods/"); }
-              else { btn.textContent = "Install"; toast("Install failed", "error"); btn.disabled = false; }
+              else { btn.textContent = "Install"; toast(r.error || "Install failed", "error"); btn.disabled = false; }
             }).catch(function () { btn.textContent = "Install"; toast("Network error", "error"); btn.disabled = false; });
           });
         });
