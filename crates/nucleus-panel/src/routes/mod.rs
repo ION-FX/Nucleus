@@ -4,6 +4,7 @@ use crate::daemon::DaemonClient;
 use crate::db::Db;
 use crate::models::{EggRow, Node, ServerRow, User};
 use anyhow::Result;
+use axum::extract::{Path as AxumPath, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use std::sync::Arc;
@@ -33,7 +34,6 @@ pub type SharedApp = Arc<App>;
 
 pub fn router(app: SharedApp) -> axum::Router {
     use axum::routing::{get, post};
-    let static_dir = app.cfg.static_dir.clone();
 
     axum::Router::new()
         .route("/", get(pages::dashboard))
@@ -126,10 +126,56 @@ pub fn router(app: SharedApp) -> axum::Router {
             "/admin/eggs",
             get(admin::eggs_page).post(admin::eggs_import),
         )
+        .route("/static/{*path}", get(static_asset))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(app.clone())
         .nest("/api/v1", api::router(app.clone()))
-        .nest_service("/static", tower_http::services::ServeDir::new(static_dir))
+}
+
+// ---------- static assets (embedded, disk override for dev) ----------
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "static"]
+struct StaticAssets;
+
+fn mime_for(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "css" => "text/css; charset=utf-8",
+        "js" => "application/javascript; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn static_asset(
+    State(app): State<SharedApp>,
+    AxumPath(path): AxumPath<String>,
+) -> Response {
+    // Disk first so devs can tweak assets without rebuilding.
+    let disk = app.cfg.static_dir.join(&path);
+    if let Ok(bytes) = tokio::fs::read(&disk).await {
+        return (
+            [(axum::http::header::CONTENT_TYPE, mime_for(&path).to_string())],
+            bytes,
+        )
+            .into_response();
+    }
+    // Fall back to the copy embedded at compile time — makes the binary
+    // self-contained when running outside a source checkout.
+    match StaticAssets::get(&path) {
+        Some(asset) => (
+            [(axum::http::header::CONTENT_TYPE, mime_for(&path).to_string())],
+            asset.data,
+        )
+            .into_response(),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 // ---------- guards ----------

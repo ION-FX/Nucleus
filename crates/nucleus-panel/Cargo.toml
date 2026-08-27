@@ -37,3 +37,4 @@ qrcode = "0.12"
 sha2 = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
 once_cell = "1"
+rust-embed = "8"
