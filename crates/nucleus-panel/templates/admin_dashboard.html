@@ -59,7 +59,7 @@
             <div class="bar"><i data-n="disk-bar" style="width:{{ n.disk_pct }}%"></i></div></td></tr>
         <tr><td class="muted">Containers</td><td><span data-n="running">{{ n.running }}</span> / <span data-n="servers">{{ n.servers }}</span> servers</td></tr>
         <tr><td class="muted">Allocated</td><td class="muted" data-n="alloc">{{ n.alloc_mem_mb }} MB · {{ n.alloc_cpu }} cores</td></tr>
-        <tr><td class="muted">Versions</td><td class="muted small">daemon <span data-n="dver">{{ n.daemon_version }}</span> · docker <span data-n="docker">{{ n.docker_version }}</span> · {{ n.cpu_cores }} cores</td></tr>
+        <tr><td class="muted">Versions</td><td class="muted small">daemon <span data-n="dver">{{ n.daemon_version }}</span>{% if n.daemon_outdated %} <span class="ver-warn" title="Daemon build differs from the panel — update nucleusd on this node">outdated</span>{% endif %} · docker <span data-n="docker">{{ n.docker_version }}</span> · {{ n.cpu_cores }} cores</td></tr>
       </tbody>
     </table>
   </div>

@@ -1140,6 +1140,17 @@ textarea.editor {
 .srv-tag:hover { color: var(--text); border-color: var(--hover-border); }
 
 .tag-filter { display: flex; gap: 7px; margin: 16px 0 0; flex-wrap: wrap; }
+.ver-warn {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px 2px;
+  border-radius: 999px;
+  cursor: help;
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
 .tag-chip {
   font-size: 12.5px;
   font-weight: 600;

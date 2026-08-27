@@ -905,6 +905,7 @@ pub struct NodeDash {
     pub online: bool,
     pub hostname: String,
     pub daemon_version: String,
+    pub daemon_outdated: bool,
     pub docker_version: String,
     pub cpu_cores: u64,
     pub mem_total_mb: u64,
@@ -1018,13 +1019,19 @@ async fn collect_node_stats(app: &App) -> (Vec<NodeDash>, FleetStats) {
         let disk_total = info.as_ref().and_then(|v| v.get("disk_total_gb")).and_then(|x| x.as_u64()).unwrap_or(0);
         let disk_used = info.as_ref().and_then(|v| v.get("disk_used_gb")).and_then(|x| x.as_u64()).unwrap_or(0);
         let uptime = info.as_ref().and_then(|v| v.get("uptime_secs")).and_then(|x| x.as_u64()).unwrap_or(0);
+        let daemon_version =
+            info.as_ref().and_then(|v| v.get("daemon_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string();
+        // Flag version skew between panel and daemon — running mismatched
+        // builds causes subtle breakage (e.g. missing installer image pulls).
+        let daemon_outdated = daemon_version != "—" && daemon_version != env!("CARGO_PKG_VERSION");
         dashes.push(NodeDash {
             id: n.id.clone(),
             name: n.name.clone(),
             alias: n.alias.clone(),
             online: online_now,
             hostname: info.as_ref().and_then(|v| v.get("hostname")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
-            daemon_version: info.as_ref().and_then(|v| v.get("daemon_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
+            daemon_version,
+            daemon_outdated,
             docker_version: info.as_ref().and_then(|v| v.get("docker_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
             cpu_cores: info.as_ref().and_then(|v| v.get("cpu_cores")).and_then(|x| x.as_u64()).unwrap_or(0),
             mem_total_mb: mem_total,
