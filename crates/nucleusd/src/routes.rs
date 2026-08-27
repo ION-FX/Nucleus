@@ -733,14 +733,31 @@ async fn schedules_delete(
 }
 
 
-async fn rerun_script(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+#[derive(Deserialize, Default)]
+struct RerunBody {
+    image: Option<String>,
+}
+
+async fn rerun_script(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Option<axum::Json<RerunBody>>,
+) -> Response {
     let rt = match state.get(&id) {
         Ok(r) => r,
         Err(e) => return err(e),
     };
-    let Some(stored) = crate::installer::load_script(&state.cfg, &id) else {
+    let Some(mut stored) = crate::installer::load_script(&state.cfg, &id) else {
         return err(anyhow::anyhow!("this server has no stored install script"));
     };
+    // Allow the panel to correct the installer image (heals servers created
+    // from stale egg imports that had none).
+    if let Some(axum::Json(b)) = body {
+        if let Some(img) = b.image {
+            stored.image = Some(img);
+            crate::installer::store_script(&state.cfg, &id, stored.clone());
+        }
+    }
     match crate::installer::start_script_install(state, rt, stored.script, stored.image) {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(e) => err(e),

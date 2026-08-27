@@ -1067,7 +1067,16 @@ pub async fn install_script_rerun(
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
-    match d.rerun_install_script(&srv.id).await {
+    // Re-run with the egg's current installer image — heals servers created
+    // from stale egg imports that had no installer image stored.
+    const DEFAULT_INSTALLER: &str = "ghcr.io/ptero-eggs/installers:debian";
+    let image = srv.egg_slug.as_deref().and_then(|slug| {
+        crate::routes::list_eggs(&app)
+            .into_iter()
+            .find(|e| e.slug == slug)
+            .map(|e| e.egg.installer_image.clone().unwrap_or_else(|| DEFAULT_INSTALLER.to_string()))
+    });
+    match d.rerun_install_script(&srv.id, image).await {
         Ok(()) => {
             crate::perms::record(&app.db, &user.email, "install.script_rerun", &id, "");
             Redirect::to(&format!("/servers/{id}/modpacks")).into_response()

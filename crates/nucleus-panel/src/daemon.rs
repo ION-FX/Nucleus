@@ -404,11 +404,12 @@ impl DaemonClient {
         ensure_ok(r).await
     }
 
-    pub async fn rerun_install_script(&self, id: &str) -> Result<()> {
-        let r = self
-            .req(Method::POST, &format!("/api/servers/{id}/install/script"))
-            .send()
-            .await?;
+    pub async fn rerun_install_script(&self, id: &str, image: Option<String>) -> Result<()> {
+        let mut req = self.req(Method::POST, &format!("/api/servers/{id}/install/script"));
+        if let Some(img) = image {
+            req = req.json(&serde_json::json!({ "image": img }));
+        }
+        let r = req.send().await?;
         ensure_ok(r).await
     }
 

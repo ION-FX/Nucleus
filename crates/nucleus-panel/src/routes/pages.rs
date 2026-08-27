@@ -647,11 +647,23 @@ pub async fn server_create(
     let rendered = nucleus_core::render_startup(&startup_tpl, &env);
 
     // Attach the egg's install script (sidecar-executed on the node).
+    // Stale egg imports may lack the installer image; egg scripts are written
+    // for Pterodactyl's installer images, so never let them fall back to the
+    // game server image (wine yolks break steamcmd).
+    const DEFAULT_INSTALLER: &str = "ghcr.io/ptero-eggs/installers:debian";
     let (install_script, installer_image) = if !egg_slug.is_empty() && egg_slug != "custom" {
         list_eggs(&app)
             .into_iter()
             .find(|e| e.slug == egg_slug)
-            .map(|e| (e.egg.install_script.clone(), e.egg.installer_image.clone()))
+            .map(|e| {
+                let img = Some(
+                    e.egg
+                        .installer_image
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_INSTALLER.to_string()),
+                );
+                (e.egg.install_script.clone(), img)
+            })
             .unwrap_or((None, None))
     } else {
         (None, None)
