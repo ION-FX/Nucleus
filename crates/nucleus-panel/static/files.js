@@ -90,8 +90,8 @@
   // drag-drop
   var dropZone = document.getElementById("drop-zone");
   var dropPath = document.getElementById("drop-path");
-  document.addEventListener("dragover", function (e) { e.preventDefault(); dropZone.hidden = false; dropPath.textContent = cwd; });
-  document.addEventListener("dragleave", function (e) { if (e.target === document.documentElement) dropZone.hidden = true; });
+  document.addEventListener("dragover", function (e) { e.preventDefault(); if (dropZone.hidden) { dropZone.hidden = false; dropPath.textContent = cwd; } });
+  document.addEventListener("dragleave", function (e) { if (!e.relatedTarget) dropZone.hidden = true; });
   document.addEventListener("drop", function (e) {
     e.preventDefault();
     dropZone.hidden = true;
