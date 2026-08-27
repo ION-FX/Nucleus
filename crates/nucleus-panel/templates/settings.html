@@ -39,7 +39,7 @@
   <h2 style="margin-top:0;">Danger zone</h2>
   <p class="muted small">Deleting removes the container. Tick the box to also wipe every file on the node — this cannot be undone.</p>
   <form method="post" action="/servers/{{ shell.id }}/delete" onsubmit="return confirm('Delete this server permanently?')">
-    <label class="check"><input type="checkbox" name="purge_data" value="1"> also delete all files on the node</label>
+    <label class="check"><input type="checkbox" name="purge_data" value="1" checked> also delete all files on the node</label>
     <button class="btn btn-danger" style="margin-top:12px;">Delete server</button>
   </form>
 </section>
