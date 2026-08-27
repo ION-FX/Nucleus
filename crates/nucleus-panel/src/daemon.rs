@@ -57,8 +57,11 @@ impl DaemonClient {
     }
 
     pub async fn create_server(&self, spec: &CreateServerRequest) -> Result<ServerStatus> {
+        // Image pulls (e.g. wine/steam eggs) can take many minutes on first
+        // create, so this call gets a much longer timeout than the default 30s.
         let r = self
             .req(Method::POST, "/api/servers")
+            .timeout(std::time::Duration::from_secs(1800))
             .json(spec)
             .send()
             .await?;

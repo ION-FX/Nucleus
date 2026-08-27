@@ -74,6 +74,9 @@ struct PteroScripts {
 struct PteroInstall {
     #[serde(default)]
     script: Option<String>,
+    /// Docker image the install script runs in (Pterodactyl stores it here).
+    #[serde(default)]
+    container: Option<String>,
 }
 
 fn value_to_string(v: &Option<serde_json::Value>) -> String {
@@ -127,6 +130,8 @@ pub fn import_ptero_egg(json: &str) -> Result<Egg> {
         })
         .collect();
 
+    let install = a.scripts.and_then(|s| s.installation);
+
     Ok(Egg {
         slug: slugify(&a.name),
         name: a.name,
@@ -134,11 +139,14 @@ pub fn import_ptero_egg(json: &str) -> Result<Egg> {
         startup: a.startup,
         variables,
         stop_command: None,
-        install_script: a
-            .scripts
-            .and_then(|s| s.installation)
-            .and_then(|i| i.script),
-        installer_image: a.installer_image,
+        install_script: install
+            .as_ref()
+            .and_then(|i| i.script.clone())
+            // normalize CRLF so the script runs cleanly under bash
+            .map(|s| s.replace("\r\n", "\n")),
+        installer_image: a
+            .installer_image
+            .or_else(|| install.and_then(|i| i.container)),
     })
 }
 

@@ -717,10 +717,21 @@ async fn run_oneoff(
     image: Option<String>,
 ) -> Result<()> {
     use futures_util::StreamExt;
+    // Some egg JSONs embed CRLF line endings which bash chokes on ($'\r').
+    let cmd = cmd.replace("\r\n", "\n");
     let name = format!("nucleus-{}-{tag}", rt.spec.id);
     let dir = rt.server_dir(&state.cfg).canonicalize().unwrap_or_else(|_| rt.server_dir(&state.cfg));
+    // Pterodactyl egg scripts expect their server files at well-known
+    // container paths (/mnt/server for newer eggs, /home/container for older
+    // ones). Bind the server dir under all of its aliases so stock scripts
+    // work unmodified.
+    let d = dir.display();
     let host_config = bollard::secret::HostConfig {
-        binds: Some(vec![format!("{}:/data", dir.display())]),
+        binds: Some(vec![
+            format!("{d}:/data"),
+            format!("{d}:/home/container"),
+            format!("{d}:/mnt/server"),
+        ]),
         ..Default::default()
     };
     let env: Vec<String> = rt
@@ -895,6 +906,15 @@ pub fn start_script_install(
 
     tokio::spawn(async move {
         job.log("[installer] running egg install script…");
+        let img_owned = image.clone().unwrap_or_else(|| rt.spec.image.clone());
+        if !crate::docker::image_exists(&state.docker, &img_owned).await {
+            job.log(&format!("[installer] pulling image {img_owned}…"));
+            if let Err(e) = crate::docker::pull_image(&state.docker, &img_owned).await {
+                job.log(&format!("[installer] image pull FAILED: {e}"));
+                job.set_state("failed");
+                return;
+            }
+        }
         let cmd = format!(
             "cd /data && set -e\n{}",
             script

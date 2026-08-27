@@ -10,7 +10,7 @@ fn container_name(id: &str) -> String {
     format!("nucleus-{id}")
 }
 
-async fn image_exists(docker: &bollard::Docker, image: &str) -> bool {
+pub(crate) async fn image_exists(docker: &bollard::Docker, image: &str) -> bool {
     docker.inspect_image(image).await.is_ok()
 }
 
@@ -38,10 +38,17 @@ async fn build_host_config(
         .await
         .with_context(|| format!("creating {}", dir.display()))?;
 
-    let binds = vec![format!(
-        "{}:/data",
-        dir.canonicalize().unwrap_or(dir).display()
-    )];
+    let binds = vec![
+        format!(
+            "{}:/data",
+            dir.canonicalize().unwrap_or(dir.clone()).display()
+        ),
+        // Pterodactyl-style aliases so stock egg scripts/startups work.
+        format!(
+            "{}:/home/container",
+            dir.canonicalize().unwrap_or(dir.clone()).display()
+        ),
+    ];
 
     let mut port_bindings = std::collections::HashMap::new();
     let mut exposed = std::collections::HashMap::new();
