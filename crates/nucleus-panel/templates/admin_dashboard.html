@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Admin · Nucleus{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Admin dashboard</h1>
+  <a class="btn btn-sm" href="/admin/update">⬆ Update</a>
+</div>
+
+<section class="stat-row">
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Nodes</span>
+    <strong id="fleet-nodes">{{ fleet.nodes_online }} / {{ fleet.nodes_total }} <span class="muted small">online</span></strong>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Servers</span>
+    <strong id="fleet-running">{{ fleet.running }} / {{ fleet.servers }} <span class="muted small">running</span></strong>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Users</span>
+    <strong id="fleet-users">{{ fleet.users }}</strong>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Allocated RAM</span>
+    <strong id="fleet-allocmem">{{ fleet.alloc_mem_mb }} MB <span class="muted small">· {{ fleet.alloc_cpu }} cores</span></strong>
+  </div>
+  <div class="glass-panel stat-tile">
+    <span class="small muted">Host RAM (online nodes)</span>
+    <strong id="fleet-hostmem">{{ fleet.mem_used_mb }} / {{ fleet.mem_total_mb }} MB</strong>
+    <div class="bar"><i id="fleet-hostmem-bar" style="width:{{ fleet.mem_pct }}%"></i></div>
+  </div>
+</section>
+
+<h2>Nodes</h2>
+{% if nodes.is_empty() %}
+<section class="glass-panel empty-state">
+  <p style="margin:0;">No nodes registered yet — <a href="/admin/nodes">add one</a> to get started.</p>
+</section>
+{% endif %}
+<div class="node-grid">
+{% for n in nodes %}
+  <div class="glass-panel node-card" data-node="{{ n.id }}">
+    <div class="sc-head">
+      <span class="dot {% if n.online %}green{% else %}red{% endif %}" data-n="dot"></span>
+      <a class="strong sc-name" href="/admin/nodes">{{ n.name }}</a>
+      <span class="chip {% if n.online %}green{% else %}red{% endif %}" data-n="chip">{% if n.online %}Online{% else %}Offline{% endif %}</span>
+    </div>
+    <div class="sc-meta muted small">
+      <span data-n="hostname">{{ n.hostname }}</span>
+      {% if !n.alias.is_empty() %}<span>· {{ n.alias }}</span>{% endif %}
+      <span data-n="uptime">· up {{ n.uptime_days }}</span>
+    </div>
+    <table class="table tight" style="margin-top:10px;">
+      <tbody>
+        <tr><td class="muted">Memory</td>
+          <td><span data-n="mem-text">{{ n.mem_used_mb }} / {{ n.mem_total_mb }} MB</span>
+            <div class="bar"><i data-n="mem-bar" style="width:{{ n.mem_pct }}%"></i></div></td></tr>
+        <tr><td class="muted">Disk</td>
+          <td><span data-n="disk-text">{{ n.disk_used_gb }} / {{ n.disk_total_gb }} GB</span>
+            <div class="bar"><i data-n="disk-bar" style="width:{{ n.disk_pct }}%"></i></div></td></tr>
+        <tr><td class="muted">Containers</td><td><span data-n="running">{{ n.running }}</span> / <span data-n="servers">{{ n.servers }}</span> servers</td></tr>
+        <tr><td class="muted">Allocated</td><td class="muted" data-n="alloc">{{ n.alloc_mem_mb }} MB · {{ n.alloc_cpu }} cores</td></tr>
+        <tr><td class="muted">Versions</td><td class="muted small">daemon <span data-n="dver">{{ n.daemon_version }}</span> · docker <span data-n="docker">{{ n.docker_version }}</span> · {{ n.cpu_cores }} cores</td></tr>
+      </tbody>
+    </table>
+  </div>
+{% endfor %}
+</div>
+
+<div class="srv-grid">
+  <section class="glass-panel">
+    <h2 style="margin-top:0;">Quick actions</h2>
+    <div class="actions">
+      <a class="btn btn-sm" href="/admin/nodes">Nodes</a>
+      <a class="btn btn-sm" href="/admin/users">Users</a>
+      <a class="btn btn-sm" href="/admin/eggs">Eggs</a>
+      <a class="btn btn-sm" href="/admin/defaults">Resource defaults</a>
+      <a class="btn btn-sm" href="/admin/activity">Activity log</a>
+      <a class="btn btn-sm" href="/admin/invites">Invites</a>
+      <a class="btn btn-sm" href="/admin/update">Update</a>
+    </div>
+  </section>
+
+  <section class="glass-panel">
+    <h2 style="margin-top:0;">Recent activity</h2>
+    <table class="table tight">
+      <tbody>
+      {% for r in recent %}
+        <tr><td class="muted nowrap">{{ r.when }}</td><td>{{ r.email }}</td><td><code>{{ r.action }}</code> <span class="muted small">{{ r.target }}</span></td></tr>
+      {% endfor %}
+      {% if recent.is_empty() %}<tr><td class="muted">Nothing yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+    <p class="small"><a href="/admin/activity">Full log →</a></p>
+  </section>
+</div>
+
+<script>
+(function () {
+  function fmtMb(v) {
+    if (v >= 1024) return (v / 1024).toFixed(1) + " GB";
+    return v + " MB";
+  }
+  function q(sel, root) { return (root || document).querySelector(sel); }
+  async function poll() {
+    try {
+      const r = await fetch("/admin/stats.json");
+      if (!r.ok) return;
+      const d = await r.json();
+      const f = d.fleet;
+      const t = (id, html) => { const e = document.getElementById(id); if (e) e.innerHTML = html; };
+      t("fleet-nodes", f.nodes_online + " / " + f.nodes_total + ' <span class="muted small">online</span>');
+      t("fleet-running", f.running + " / " + f.servers + ' <span class="muted small">running</span>');
+      t("fleet-users", f.users);
+      t("fleet-allocmem", fmtMb(f.alloc_mem_mb) + ' <span class="muted small">· ' + f.alloc_cpu + ' cores</span>');
+      t("fleet-hostmem", f.mem_used_mb + " / " + f.mem_total_mb + " MB");
+      const hb = q("#fleet-hostmem-bar");
+      if (hb) hb.style.width = (f.mem_total_mb > 0 ? Math.round(f.mem_used_mb / f.mem_total_mb * 100) : 0) + "%";
+      (d.nodes || []).forEach(function (n) {
+        const card = document.querySelector('.node-card[data-node="' + n.id + '"]');
+        if (!card) return;
+        const dot = q('[data-n="dot"]', card);
+        const chip = q('[data-n="chip"]', card);
+        if (n.online) { dot.className = "dot green"; chip.className = "chip green"; chip.textContent = "Online"; }
+        else { dot.className = "dot red"; chip.className = "chip red"; chip.textContent = "Offline"; }
+        q('[data-n="mem-text"]', card).textContent = n.mem_used_mb + " / " + n.mem_total_mb + " MB";
+        q('[data-n="mem-bar"]', card).style.width = Math.round(n.mem_percent) + "%";
+        q('[data-n="disk-text"]', card).textContent = n.disk_used_gb + " / " + n.disk_total_gb + " GB";
+        q('[data-n="disk-bar"]', card).style.width = Math.round(n.disk_percent) + "%";
+        q('[data-n="running"]', card).textContent = n.running;
+        q('[data-n="servers"]', card).textContent = n.servers;
+      });
+    } catch (e) {}
+  }
+  poll();
+  setInterval(poll, 5000);
+})();
+</script>
+{% endblock %}

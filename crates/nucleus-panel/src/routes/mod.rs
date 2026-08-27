@@ -85,10 +85,9 @@ pub fn router(app: SharedApp) -> axum::Router {
             get(proxy::backup_download),
         )
         .route("/servers/{id}/ai/diagnose", post(proxy::ai_diagnose))
-        .route(
-            "/admin/nodes",
-            get(admin::nodes_page).post(admin::nodes_add),
-        )
+        .route("/admin", get(admin::dashboard_page))
+        .route("/admin/stats.json", get(admin::dashboard_stats))
+        .route("/admin/nodes", get(admin::nodes_page).post(admin::nodes_add))
         .route(
             "/admin/nodes/{id}/edit",
             post(admin::nodes_edit),

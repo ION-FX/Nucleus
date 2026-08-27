@@ -86,6 +86,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/sftp", get(sftp_info))
         .route("/servers/{id}/sftp/reset", post(sftp_reset))
         .route("/servers/{id}/stats", get(server_stats))
+        .route("/info", get(node_info))
         .route(
             "/servers/{id}/schedules",
             get(schedules_list).post(schedules_add),
@@ -118,6 +119,93 @@ async fn inspect_pack(State(_state): State<Arc<AppState>>, body: axum::body::Byt
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// Rich node info for the panel's admin dashboard.
+#[derive(serde::Serialize)]
+struct NodeInfo {
+    hostname: String,
+    daemon_version: String,
+    docker_version: String,
+    cpu_cores: u64,
+    mem_total_mb: u64,
+    mem_used_mb: u64,
+    disk_total_gb: u64,
+    disk_used_gb: u64,
+    data_dir: String,
+    servers: usize,
+    running: usize,
+    uptime_secs: u64,
+}
+
+fn read_hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".into())
+}
+
+fn read_meminfo() -> (u64, u64) {
+    let (mut total, mut avail) = (0u64, 0u64);
+    if let Ok(raw) = std::fs::read_to_string("/proc/meminfo") {
+        for line in raw.lines() {
+            let mut parts = line.split_whitespace();
+            match parts.next() {
+                Some("MemTotal:") => total = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0) / 1024,
+                Some("MemAvailable:") => avail = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0) / 1024,
+                _ => {}
+            }
+        }
+    }
+    (total, total.saturating_sub(avail))
+}
+
+fn read_disk(path: &std::path::Path) -> (u64, u64) {
+    let total = fs2::total_space(path).unwrap_or(0) / 1024 / 1024 / 1024;
+    let free = fs2::free_space(path).unwrap_or(0) / 1024 / 1024 / 1024;
+    (total, total.saturating_sub(free))
+}
+
+async fn node_info(State(state): State<Arc<AppState>>) -> Response {
+    let cpu_cores = std::thread::available_parallelism()
+        .map(|n| n.get() as u64)
+        .unwrap_or(1);
+    let (mem_total_mb, mem_used_mb) = tokio::task::spawn_blocking(read_meminfo)
+        .await
+        .unwrap_or((0, 0));
+    let data_dir = state.cfg.data_dir.clone();
+    let disk = tokio::task::spawn_blocking(move || read_disk(&data_dir))
+        .await
+        .unwrap_or((0, 0));
+    let docker_version = state
+        .docker
+        .version()
+        .await
+        .ok()
+        .and_then(|v| v.version)
+        .unwrap_or_else(|| "?".into());
+
+    let mut running = 0usize;
+    for e in state.servers.iter() {
+        if e.value().running.load(std::sync::atomic::Ordering::Relaxed) {
+            running += 1;
+        }
+    }
+
+    let info = NodeInfo {
+        hostname: read_hostname(),
+        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        docker_version,
+        cpu_cores,
+        mem_total_mb,
+        mem_used_mb,
+        disk_total_gb: disk.0,
+        disk_used_gb: disk.1,
+        data_dir: state.cfg.data_dir.display().to_string(),
+        servers: state.servers.len(),
+        running,
+        uptime_secs: state.started.elapsed().as_secs(),
+    };
+    axum::Json(info).into_response()
 }
 
 async fn create_server(

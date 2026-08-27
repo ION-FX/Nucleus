@@ -145,6 +145,8 @@ pub struct AppState {
     pub stats_prev: DashMap<String, (u64, u64)>,
     /// Last network totals for rate computation.
     pub net_prev: DashMap<String, NetPrev>,
+    /// When the daemon process started (for uptime reporting).
+    pub started: std::time::Instant,
 }
 
 #[derive(Clone, Copy)]
@@ -193,6 +195,7 @@ impl AppState {
             sftp_creds: std::sync::RwLock::new(creds),
             stats_prev: DashMap::new(),
             net_prev: DashMap::new(),
+            started: std::time::Instant::now(),
         }
     }
 

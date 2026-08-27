@@ -896,6 +896,253 @@ pub async fn defaults_save(
     })
 }
 
+// ---------- admin dashboard ----------
+
+pub struct NodeDash {
+    pub id: String,
+    pub name: String,
+    pub alias: String,
+    pub online: bool,
+    pub hostname: String,
+    pub daemon_version: String,
+    pub docker_version: String,
+    pub cpu_cores: u64,
+    pub mem_total_mb: u64,
+    pub mem_used_mb: u64,
+    pub mem_percent: f64,
+    pub mem_pct: i64,
+    pub disk_total_gb: u64,
+    pub disk_used_gb: u64,
+    pub disk_percent: f64,
+    pub disk_pct: i64,
+    pub servers: usize,
+    pub running: usize,
+    pub alloc_mem_mb: u64,
+    pub alloc_cpu: f64,
+    pub alloc_disk_mb: u64,
+    pub uptime_days: String,
+}
+
+#[derive(Template)]
+#[template(path = "admin_dashboard.html")]
+pub struct DashboardTmpl {
+    pub fleet: FleetStats,
+    pub nodes: Vec<NodeDash>,
+    pub recent: Vec<ActivityRow>,
+    pub user_email: String,
+    pub is_admin: bool,
+}
+
+pub struct FleetStats {
+    pub nodes_total: usize,
+    pub nodes_online: usize,
+    pub servers: usize,
+    pub running: usize,
+    pub users: usize,
+    pub alloc_mem_mb: u64,
+    pub alloc_cpu: f64,
+    pub mem_total_mb: u64,
+    pub mem_used_mb: u64,
+    pub mem_pct: i64,
+}
+
+async fn collect_node_stats(app: &App) -> (Vec<NodeDash>, FleetStats) {
+    let nodes = list_nodes(app);
+    // per-node allocation sums from the DB
+    let mut alloc: std::collections::HashMap<String, (usize, u64, f64, u64)> =
+        std::collections::HashMap::new();
+    let _ = app.db.with(|c| {
+        let mut stmt = c.prepare(
+            "SELECT node_id, COUNT(*), COALESCE(SUM(mem_mb),0), COALESCE(SUM(cpu),0), COALESCE(SUM(disk_mb),0) FROM servers GROUP BY node_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as usize,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, f64>(3)?,
+                r.get::<_, i64>(4)? as u64,
+            ))
+        })?;
+        for r in rows.filter_map(|r| r.ok()) {
+            alloc.insert(r.0.clone(), (r.1, r.2, r.3, r.4));
+        }
+        Ok(())
+    });
+
+    let users: usize = app
+        .db
+        .with(|c| Ok(c.query_row("SELECT COUNT(*) FROM users", [], |r| r.get::<_, i64>(0))? as usize))
+        .unwrap_or(0);
+
+    let mut dashes: Vec<NodeDash> = Vec::new();
+    let clients: Vec<DaemonClient> = nodes
+        .iter()
+        .map(|n| DaemonClient::new(app.http.clone(), n))
+        .collect();
+    let mut futs = Vec::new();
+    for d in &clients {
+        futs.push(tokio::time::timeout(std::time::Duration::from_secs(6), d.info()));
+    }
+    let results = futures_util::future::join_all(futs).await;
+
+    let servers_total: usize = alloc.values().map(|a| a.0).sum();
+    let (mut fleet_alloc_mem, mut fleet_alloc_cpu) = (0u64, 0f64);
+    let (mut online, mut running_total) = (0usize, 0usize);
+    let (mut fleet_mem_total, mut fleet_mem_used) = (0u64, 0u64);
+
+    for (n, res) in nodes.iter().zip(results.into_iter()) {
+        let (count, amem, acpu, adisk) = alloc.get(&n.id).cloned().unwrap_or((0, 0, 0.0, 0));
+        fleet_alloc_mem += amem;
+        fleet_alloc_cpu += acpu;
+        let info = match res {
+            Ok(Ok(v)) => Some(v),
+            _ => None,
+        };
+        let (online_now, dash_running) = if let Some(v) = &info {
+            let r = v.get("running").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+            running_total += r;
+            (true, r)
+        } else {
+            (false, 0)
+        };
+        if online_now {
+            online += 1;
+        }
+        let mem_total = info.as_ref().and_then(|v| v.get("mem_total_mb")).and_then(|x| x.as_u64()).unwrap_or(0);
+        let mem_used = info.as_ref().and_then(|v| v.get("mem_used_mb")).and_then(|x| x.as_u64()).unwrap_or(0);
+        if online_now {
+            fleet_mem_total += mem_total;
+            fleet_mem_used += mem_used;
+        }
+        let disk_total = info.as_ref().and_then(|v| v.get("disk_total_gb")).and_then(|x| x.as_u64()).unwrap_or(0);
+        let disk_used = info.as_ref().and_then(|v| v.get("disk_used_gb")).and_then(|x| x.as_u64()).unwrap_or(0);
+        let uptime = info.as_ref().and_then(|v| v.get("uptime_secs")).and_then(|x| x.as_u64()).unwrap_or(0);
+        dashes.push(NodeDash {
+            id: n.id.clone(),
+            name: n.name.clone(),
+            alias: n.alias.clone(),
+            online: online_now,
+            hostname: info.as_ref().and_then(|v| v.get("hostname")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
+            daemon_version: info.as_ref().and_then(|v| v.get("daemon_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
+            docker_version: info.as_ref().and_then(|v| v.get("docker_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string(),
+            cpu_cores: info.as_ref().and_then(|v| v.get("cpu_cores")).and_then(|x| x.as_u64()).unwrap_or(0),
+            mem_total_mb: mem_total,
+            mem_used_mb: mem_used,
+            mem_percent: if mem_total > 0 { mem_used as f64 / mem_total as f64 * 100.0 } else { 0.0 },
+            mem_pct: if mem_total > 0 { (mem_used as f64 / mem_total as f64 * 100.0) as i64 } else { 0 },
+            disk_total_gb: disk_total,
+            disk_used_gb: disk_used,
+            disk_percent: if disk_total > 0 { disk_used as f64 / disk_total as f64 * 100.0 } else { 0.0 },
+            disk_pct: if disk_total > 0 { (disk_used as f64 / disk_total as f64 * 100.0) as i64 } else { 0 },
+            servers: count,
+            running: dash_running,
+            alloc_mem_mb: amem,
+            alloc_cpu: acpu,
+            alloc_disk_mb: adisk,
+            uptime_days: if uptime > 86400 {
+                format!("{:.1} d", uptime as f64 / 86400.0)
+            } else if uptime > 3600 {
+                format!("{:.1} h", uptime as f64 / 3600.0)
+            } else {
+                format!("{} min", uptime / 60)
+            },
+        });
+    }
+
+    (
+        dashes,
+        FleetStats {
+            nodes_total: nodes.len(),
+            nodes_online: online,
+            servers: servers_total,
+            running: running_total,
+            users,
+            alloc_mem_mb: fleet_alloc_mem,
+            alloc_cpu: fleet_alloc_cpu,
+            mem_total_mb: fleet_mem_total,
+            mem_used_mb: fleet_mem_used,
+            mem_pct: if fleet_mem_total > 0 { (fleet_mem_used as f64 / fleet_mem_total as f64 * 100.0) as i64 } else { 0 },
+        },
+    )
+}
+
+pub async fn dashboard_page(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return Redirect::to("/login").into_response();
+    }
+    let (user_email, _) = nav_ctx(&app, &headers);
+    let (nodes, fleet) = collect_node_stats(&app).await;
+    let recent: Vec<ActivityRow> = app
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT ts, email, action, target, detail FROM activity ORDER BY id DESC LIMIT 8",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
+                })?
+                .filter_map(|r| r.ok())
+                .map(|(ts, email, action, target, detail)| ActivityRow {
+                    when: chrono::DateTime::from_timestamp(ts, 0)
+                        .map(|d| d.format("%m-%d %H:%M").to_string())
+                        .unwrap_or_default(),
+                    email, action, target, detail,
+                })
+                .collect();
+            Ok(rows)
+        })
+        .unwrap_or_default();
+    page(&DashboardTmpl { fleet, nodes, recent, user_email, is_admin: true })
+}
+
+/// JSON variant polled by the dashboard for live updates.
+pub async fn dashboard_stats(
+    State(app): State<SharedApp>,
+    headers: HeaderMap,
+) -> Response {
+    if admin_guard(&app, &headers).is_err() {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    }
+    let (nodes, fleet) = collect_node_stats(&app).await;
+    let nodes_json: Vec<serde_json::Value> = nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "id": n.id,
+                "online": n.online,
+                "mem_total_mb": n.mem_total_mb,
+                "mem_used_mb": n.mem_used_mb,
+                "mem_percent": (n.mem_percent * 10.0).round() / 10.0,
+                "disk_total_gb": n.disk_total_gb,
+                "disk_used_gb": n.disk_used_gb,
+                "disk_percent": (n.disk_percent * 10.0).round() / 10.0,
+                "servers": n.servers,
+                "running": n.running,
+            })
+        })
+        .collect();
+    axum::Json(serde_json::json!({
+        "fleet": {
+            "nodes_total": fleet.nodes_total,
+            "nodes_online": fleet.nodes_online,
+            "servers": fleet.servers,
+            "running": fleet.running,
+            "users": fleet.users,
+            "alloc_mem_mb": fleet.alloc_mem_mb,
+            "alloc_cpu": fleet.alloc_cpu,
+            "mem_total_mb": fleet.mem_total_mb,
+            "mem_used_mb": fleet.mem_used_mb,
+        },
+        "nodes": nodes_json,
+    }))
+    .into_response()
+}
+
 // ---------- updater ----------
 
 const REPO: &str = "ION-FX/Nucleus";

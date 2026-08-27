@@ -35,6 +35,16 @@ impl DaemonClient {
         Ok(())
     }
 
+    /// Rich node stats for the admin dashboard.
+    pub async fn info(&self) -> Result<serde_json::Value> {
+        let r = self
+            .req(Method::GET, "/api/info")
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await?;
+        parse(r).await
+    }
+
     /// Ask the daemon to parse a modpack zip and recommend image/startup.
     pub async fn inspect_pack(&self, data: Vec<u8>) -> Result<serde_json::Value> {
         let r = self
