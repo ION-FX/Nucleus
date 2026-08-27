@@ -898,6 +898,15 @@ pub async fn defaults_save(
 
 // ---------- admin dashboard ----------
 
+/// Full panel version (semver + git SHA) for daemon skew detection.
+pub fn panel_version() -> String {
+    format!(
+        "{}+{}",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("NUCLEUS_GIT_SHA").unwrap_or("dev")
+    )
+}
+
 pub struct NodeDash {
     pub id: String,
     pub name: String,
@@ -1021,9 +1030,11 @@ async fn collect_node_stats(app: &App) -> (Vec<NodeDash>, FleetStats) {
         let uptime = info.as_ref().and_then(|v| v.get("uptime_secs")).and_then(|x| x.as_u64()).unwrap_or(0);
         let daemon_version =
             info.as_ref().and_then(|v| v.get("daemon_version")).and_then(|x| x.as_str()).unwrap_or("—").to_string();
-        // Flag version skew between panel and daemon — running mismatched
-        // builds causes subtle breakage (e.g. missing installer image pulls).
-        let daemon_outdated = daemon_version != "—" && daemon_version != env!("CARGO_PKG_VERSION");
+        // Flag version skew between panel and daemon — mismatched builds cause
+        // subtle breakage (e.g. a daemon missing installer image pulls).
+        // Version strings embed the git SHA so different builds never compare
+        // equal.
+        let daemon_outdated = daemon_version != "—" && daemon_version != panel_version();
         dashes.push(NodeDash {
             id: n.id.clone(),
             name: n.name.clone(),

@@ -900,14 +900,38 @@ pub fn start_script_install(
         .insert(rt.spec.id.clone(), job.clone());
 
     tokio::spawn(async move {
+        // Mirror installer lifecycle into the server console so users (and
+        // remote debugging) see progress without opening the install status.
         job.log("[installer] running egg install script…");
+        rt.push_log("[installer] running egg install script…");
         let img_owned = image.clone().unwrap_or_else(|| rt.spec.image.clone());
         if !crate::docker::image_exists(&state.docker, &img_owned).await {
             job.log(&format!("[installer] pulling image {img_owned}…"));
-            if let Err(e) = crate::docker::pull_image(&state.docker, &img_owned).await {
-                job.log(&format!("[installer] image pull FAILED: {e}"));
-                job.set_state("failed");
-                return;
+            rt.push_log(&format!("[installer] pulling image {img_owned}…"));
+            match crate::docker::pull_image(&state.docker, &img_owned).await {
+                Err(e) => {
+                    let msg = format!("[installer] image pull FAILED: {e:#}");
+                    job.log(&msg);
+                    rt.push_log(&msg);
+                    job.set_state("failed");
+                    return;
+                }
+                Ok(()) => {
+                    // Belt and braces: verify the image actually landed
+                    // before container create 404s with a cryptic message.
+                    if !crate::docker::image_exists(&state.docker, &img_owned).await {
+                        let msg = format!(
+                            "[installer] image pull reported success but {img_owned} is still missing (disk full?)"
+                        );
+                        job.log(&msg);
+                        rt.push_log(&msg);
+                        job.set_state("failed");
+                        return;
+                    }
+                    let msg = format!("[installer] image {img_owned} ready");
+                    job.log(&msg);
+                    rt.push_log(&msg);
+                }
             }
         }
         let cmd = format!(

@@ -193,7 +193,11 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Response {
 
     let info = NodeInfo {
         hostname: read_hostname(),
-        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        daemon_version: format!(
+            "{}+{}",
+            env!("CARGO_PKG_VERSION"),
+            option_env!("NUCLEUS_GIT_SHA").unwrap_or("dev")
+        ),
         docker_version,
         cpu_cores,
         mem_total_mb,
