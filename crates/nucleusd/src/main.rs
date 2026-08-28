@@ -53,6 +53,10 @@ async fn main() -> Result<()> {
     }
     tracing::info!(servers = st.servers.len(), data_dir = %data_dir.display(), "nucleusd starting");
 
+    // Reap ghost containers: install sidecars from a previous run and
+    // runtime containers whose server is no longer in the registry.
+    docker::reap_unmanaged_containers(&st).await;
+
     scheduler::spawn(st.clone());
 
     // Embedded SFTP server (per-server jailed file access).

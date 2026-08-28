@@ -10,6 +10,88 @@ fn container_name(id: &str) -> String {
     format!("nucleus-{id}")
 }
 
+fn install_container_name(id: &str) -> String {
+    format!("nucleus-{id}-install")
+}
+
+/// Every container Nucleus creates carries one of these labels; used to find
+/// and reap strays whose name may be unknown.
+const NUCLEUS_LABELS: [&str; 2] = ["nucleus.server.id", "nucleus.oneoff"];
+
+/// (container name, label value) for all containers carrying `label`.
+async fn labeled_containers(docker: &bollard::Docker, label: &str) -> Vec<(String, String)> {
+    let mut filters = std::collections::HashMap::new();
+    filters.insert("label".to_string(), vec![label.to_string()]);
+    match docker
+        .list_containers(Some(bollard::container::ListContainersOptions {
+            all: true,
+            filters,
+            ..Default::default()
+        }))
+        .await
+    {
+        Ok(list) => list
+            .into_iter()
+            .filter_map(|c| {
+                let val = c.labels?.get(label)?.clone();
+                let name = c
+                    .names?
+                    .first()?
+                    .trim_start_matches('/')
+                    .to_string();
+                Some((name, val))
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn force_remove_opts() -> bollard::container::RemoveContainerOptions {
+    bollard::container::RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+    }
+}
+
+/// Kill and remove everything belonging to this server: the runtime
+/// container, the egg-install sidecar, and any labeled stray (covers the
+/// window where a delete crashed between steps).
+async fn kill_all_server_containers(state: &AppState, id: &str) {
+    for name in [container_name(id), install_container_name(id)] {
+        let _ = state.docker.remove_container(&name, Some(force_remove_opts())).await;
+    }
+    for label in NUCLEUS_LABELS {
+        for (name, val) in labeled_containers(&state.docker, label).await {
+            let owned = match label {
+                "nucleus.server.id" => val == id,
+                // oneoff label value is "{server-id}:{tag}"
+                _ => val.split(':').next() == Some(id),
+            };
+            if owned {
+                let _ = state.docker.remove_container(&name, Some(force_remove_opts())).await;
+            }
+        }
+    }
+}
+
+/// Startup reconciliation. Install sidecars never survive a daemon restart,
+/// so any `nucleus.oneoff` container found at boot is stale; runtime
+/// containers whose server id is missing from the registry are ghosts from a
+/// crashed delete or a lost registry file. Reap both so they can't keep
+/// burning resources invisibly (the "deleted it but it kept running" bug).
+pub async fn reap_unmanaged_containers(state: &Arc<AppState>) {
+    for (name, _) in labeled_containers(&state.docker, "nucleus.oneoff").await {
+        tracing::warn!(container = %name, "reaping stale install container from a previous run");
+        let _ = state.docker.remove_container(&name, Some(force_remove_opts())).await;
+    }
+    for (name, id) in labeled_containers(&state.docker, "nucleus.server.id").await {
+        if !state.servers.contains_key(&id) {
+            tracing::warn!(container = %name, server = %id, "reaping orphaned server container (not in registry)");
+            let _ = state.docker.remove_container(&name, Some(force_remove_opts())).await;
+        }
+    }
+}
+
 pub(crate) async fn image_exists(docker: &bollard::Docker, image: &str) -> bool {
     docker.inspect_image(image).await.is_ok()
 }
@@ -200,6 +282,12 @@ pub async fn create_server(
         name: name.clone(),
         platform: None,
     };
+    // A leftover container from an interrupted create/delete would 409 the
+    // create; clear the way first.
+    let _ = state
+        .docker
+        .remove_container(&name, Some(force_remove_opts()))
+        .await;
     state
         .docker
         .create_container(Some(create_opts), config)
@@ -228,24 +316,25 @@ pub async fn create_server(
 }
 
 pub async fn remove_server(state: Arc<AppState>, id: &str, purge_data: bool) -> Result<()> {
-    let rt = state.get(id)?;
-    if rt.running.load(Ordering::Relaxed) {
-        power(state.clone(), id, PowerAction::Kill, None).await?;
+    // The registry entry may already be gone (deleting a ghost after a
+    // crash); that must not stop the docker-side cleanup.
+    let rt = state.servers.get(id).map(|e| e.value().clone());
+    if let Some(rt) = &rt {
+        if rt.running.load(Ordering::Relaxed) {
+            let _ = power(state.clone(), id, PowerAction::Kill, None).await;
+        }
     }
-    let _ = state
-        .docker
-        .remove_container(
-            &container_name(id),
-            Some(bollard::container::RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            }),
-        )
-        .await;
+    // Also kill the egg-install sidecar: deleting mid-install used to leave
+    // that container running with the data dir ripped out from under it.
+    kill_all_server_containers(&state, id).await;
+    state.installs.remove(id);
     state.servers.remove(id);
     save_registry(&state.cfg, &state.servers);
     if purge_data {
-        let dir = rt.server_dir(&state.cfg);
+        let dir = match &rt {
+            Some(rt) => rt.server_dir(&state.cfg),
+            None => state.cfg.servers_dir().join(id),
+        };
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
     Ok(())

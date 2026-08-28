@@ -810,6 +810,56 @@ textarea.editor {
   color-scheme: dark;
 }
 
+/* Prime — a tribute to Peter Cullen, the voice of Optimus Prime:
+   truck red and sentinel blue over dark navy. */
+[data-theme="prime"] {
+  --bg-0: #060913;
+  --bg-1: #0a0f1f;
+  --panel-under: rgba(13, 20, 40, 0.76);
+  --table-under: rgba(12, 18, 37, 0.74);
+  --input-bg: rgba(10, 15, 30, 0.62);
+  --input-focus-bg: rgba(14, 21, 42, 0.88);
+  --option-bg: #101a33;
+  --log-bg: rgba(3, 6, 14, 0.74);
+  --radial-a: rgba(155, 22, 44, 0.4);
+  --radial-b: rgba(29, 78, 216, 0.4);
+  --blob-1: #a1122f;
+  --blob-2: #1d4ed8;
+  --blob-3: #27417f;
+  --blob-opacity: 0.34;
+  --accent: #9fb4e8;
+  --primary-a: #c8102e;
+  --primary-b: #1d4ed8;
+  --primary-hover-a: #e01835;
+  --primary-hover-b: #2f63f0;
+  --primary-contrast: #f6f7fb;
+  --primary-glow: rgba(200, 16, 46, 0.4);
+  --orb-glow: rgba(200, 16, 46, 0.5);
+  color-scheme: dark;
+}
+[data-theme="prime"] .orb {
+  color: #e01835;
+  text-shadow: 0 0 18px rgba(224, 24, 53, 0.65);
+}
+
+/* Prime easter eggs — only while the Prime theme is active */
+.prime-quote {
+  position: fixed; right: 18px; bottom: 14px; z-index: 60;
+  font-size: 12.5px; font-style: italic; letter-spacing: 0.05em;
+  color: #cdd6ee; opacity: 0.78; pointer-events: none;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7);
+  animation: prime-fade 1.2s ease;
+}
+@keyframes prime-fade { from { opacity: 0; } }
+.prime-line { color: #ef5b6e; }
+.prime-admin-quote { display: none; }
+[data-theme="prime"] .prime-admin-quote {
+  display: block;
+  margin: -4px 0 18px;
+  font-size: 13.5px; font-style: italic; letter-spacing: 0.04em;
+  color: #d9a0aa;
+}
+
 [data-theme="frost"] {
   --bg-0: #eceef2;
   --bg-1: #e2e5eb;

@@ -38,6 +38,7 @@
         <button data-set-theme="aurora"><span class="sw" style="background:linear-gradient(135deg,#a78bfa,#60a5fa)"></span>Aurora</button>
         <button data-set-theme="abyss"><span class="sw" style="background:linear-gradient(135deg,#67c3ee,#3d7bd6)"></span>Abyss</button>
         <button data-set-theme="ember"><span class="sw" style="background:linear-gradient(135deg,#f5a95c,#e2603c)"></span>Ember</button>
+        <button data-set-theme="prime"><span class="sw" style="background:linear-gradient(135deg,#c8102e,#1d4ed8)"></span>Prime</button>
         <button data-set-theme="frost"><span class="sw" style="background:linear-gradient(135deg,#f2f4f8,#c9cfdd)"></span>Frost (light)</button>
       </div>
     </div>
@@ -72,11 +73,59 @@
     if (name === "midnight") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = name;
     try { localStorage.setItem("nucleus-theme", name); } catch (err) {}
+    document.dispatchEvent(new Event("nucleus-theme"));
     menu.hidden = true;
   });
   document.addEventListener("click", function (e) {
     if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true;
   });
+})();
+</script>
+<script>
+/* Prime — a quiet tribute to Peter Cullen, the voice of Optimus Prime.
+   Active only while the Prime theme is selected. */
+(function () {
+  var QUOTES = [
+    "Freedom is the right of all sentient beings.",
+    "Be strong enough to be gentle.",
+    "Autobots, roll out!",
+    "One shall stand, one shall fall.",
+    "Till all are one."
+  ];
+  var el = null, timer = null;
+  var idx = Math.floor(Math.random() * QUOTES.length);
+  function active() { return document.documentElement.dataset.theme === "prime"; }
+  function rotate() {
+    idx = (idx + 1) % QUOTES.length;
+    if (el) el.textContent = "\u25c6 " + QUOTES[idx];
+  }
+  function greetConsole() {
+    var log = document.getElementById("console-log");
+    if (log && !log.dataset.primeGreeting) {
+      log.dataset.primeGreeting = "1";
+      var line = document.createElement("span");
+      line.className = "prime-line";
+      line.textContent = "[nucleus] Freedom is the right of all sentient beings.\n";
+      log.appendChild(line);
+    }
+  }
+  function sync() {
+    if (active()) {
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "prime-quote";
+        el.textContent = "\u25c6 " + QUOTES[idx];
+        document.body.appendChild(el);
+      }
+      if (!timer) timer = setInterval(rotate, 12000);
+      greetConsole();
+    } else {
+      if (timer) { clearInterval(timer); timer = null; }
+      if (el) { el.remove(); el = null; }
+    }
+  }
+  document.addEventListener("nucleus-theme", sync);
+  sync();
 })();
 </script>
 <script src="/static/htmx.min.js"></script>

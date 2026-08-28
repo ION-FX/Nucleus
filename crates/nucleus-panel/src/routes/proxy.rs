@@ -135,8 +135,22 @@ pub async fn delete_server(
         &user.email,
         "server.delete",
         &srv.name,
-        &format!("{} (purge={})", srv.id, purge),
+        &match &res {
+            Ok(()) => format!("{} (purge={})", srv.id, purge),
+            Err(e) => format!("{} FAILED (purge={}): {e:#}", srv.id, purge),
+        },
     );
+    if let Err(e) = res {
+        // The node still holds the container/data — dropping the row now
+        // would orphan it (invisible in the panel but alive on the node).
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "delete failed: {e:#} — the server was NOT deleted; check the node and retry — <a href='/servers/{id}/settings'>back</a>"
+            ),
+        )
+            .into_response();
+    }
     // clean up memberships
     let _ = app.db.with(|c| {
         c.execute("DELETE FROM user_servers WHERE server_id = ?1", rusqlite::params![srv.id])?;
@@ -149,14 +163,7 @@ pub async fn delete_server(
         )?;
         Ok(())
     });
-    match res {
-        Ok(()) => Redirect::to("/").into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            format!("delete failed: {e:#} — <a href='/'>dashboard</a>"),
-        )
-            .into_response(),
-    }
+    Redirect::to("/").into_response()
 }
 
 // ---------- server transfer between nodes ----------
