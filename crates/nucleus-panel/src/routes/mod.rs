@@ -152,27 +152,83 @@ fn mime_for(path: &str) -> &'static str {
     }
 }
 
+/// Compile-time timestamp of this binary; on-disk static assets are only
+/// served when newer, so a stale static/ dir can't shadow embedded ones.
+fn build_epoch() -> u64 {
+    option_env!("NUCLEUS_BUILD_EPOCH")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn asset_etag(bytes: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    format!("\"{:x}-{}\"", h.finish(), bytes.len())
+}
+
+fn asset_response(
+    headers: &axum::http::HeaderMap,
+    path: &str,
+    bytes: impl Into<axum::body::Bytes>,
+) -> Response {
+    use axum::http::header;
+    let bytes: axum::body::Bytes = bytes.into();
+    let etag = asset_etag(&bytes);
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.split(',').any(|t| t.trim() == etag))
+        .unwrap_or(false)
+    {
+        return (
+            axum::http::StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag),
+                (header::CACHE_CONTROL, "no-cache".to_string()),
+            ],
+        )
+            .into_response();
+    }
+    (
+        [
+            (header::CONTENT_TYPE, mime_for(path).to_string()),
+            (header::ETAG, etag),
+            // Revalidate on every load: themes ship via CSS and a stale
+            // stylesheet renders half-themed pages.
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 async fn static_asset(
     State(app): State<SharedApp>,
     AxumPath(path): AxumPath<String>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
-    // Disk first so devs can tweak assets without rebuilding.
+    // Disk override for dev — but only while the file is NEWER than this
+    // binary. Otherwise fall through to the embedded copy: upgrades must
+    // win over leftovers from an old checkout or release archive.
     let disk = app.cfg.static_dir.join(&path);
-    if let Ok(bytes) = tokio::fs::read(&disk).await {
-        return (
-            [(axum::http::header::CONTENT_TYPE, mime_for(&path).to_string())],
-            bytes,
-        )
-            .into_response();
+    if let Ok(meta) = tokio::fs::metadata(&disk).await {
+        let newer = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() >= build_epoch())
+            .unwrap_or(false);
+        if newer {
+            if let Ok(bytes) = tokio::fs::read(&disk).await {
+                return asset_response(&headers, &path, bytes);
+            }
+        }
     }
     // Fall back to the copy embedded at compile time — makes the binary
     // self-contained when running outside a source checkout.
     match StaticAssets::get(&path) {
-        Some(asset) => (
-            [(axum::http::header::CONTENT_TYPE, mime_for(&path).to_string())],
-            asset.data,
-        )
-            .into_response(),
+        Some(asset) => asset_response(&headers, &path, asset.data.into_owned()),
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
 }

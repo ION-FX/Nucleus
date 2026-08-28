@@ -835,6 +835,8 @@ textarea.editor {
   --primary-contrast: #f6f7fb;
   --primary-glow: rgba(200, 16, 46, 0.4);
   --orb-glow: rgba(200, 16, 46, 0.5);
+  --scroll-thumb: rgba(159, 180, 232, 0.2);
+  --dot-ring: rgba(159, 180, 232, 0.09);
   color-scheme: dark;
 }
 [data-theme="prime"] .orb {

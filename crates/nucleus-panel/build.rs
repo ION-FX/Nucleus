@@ -14,4 +14,12 @@ fn main() {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=NUCLEUS_GIT_SHA={sha}");
+    // Compile timestamp: lets the panel prefer on-disk static assets only
+    // when they are newer than this binary (a stale static/ dir from an old
+    // deployment must never shadow the freshly embedded assets).
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    println!("cargo:rustc-env=NUCLEUS_BUILD_EPOCH={epoch}");
 }
