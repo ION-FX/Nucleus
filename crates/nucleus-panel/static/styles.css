@@ -815,19 +815,26 @@ textarea.editor {
 [data-theme="prime"] {
   --bg-0: #060913;
   --bg-1: #0a0f1f;
-  --panel-under: rgba(13, 20, 40, 0.76);
-  --table-under: rgba(12, 18, 37, 0.74);
-  --input-bg: rgba(10, 15, 30, 0.62);
-  --input-focus-bg: rgba(14, 21, 42, 0.88);
-  --option-bg: #101a33;
+  --panel-under: rgba(21, 39, 92, 0.87);
+  --table-under: rgba(19, 36, 84, 0.85);
+  --input-bg: rgba(14, 26, 62, 0.7);
+  --input-focus-bg: rgba(18, 33, 78, 0.9);
+  --option-bg: #12224e;
   --log-bg: rgba(3, 6, 14, 0.74);
-  --radial-a: rgba(155, 22, 44, 0.4);
-  --radial-b: rgba(29, 78, 216, 0.4);
+  --subtle-bg: rgba(110, 145, 255, 0.08);
+  --th-bg: rgba(110, 145, 255, 0.11);
+  --row-hover: rgba(110, 145, 255, 0.12);
+  --chip-bg: rgba(110, 145, 255, 0.14);
+  --glass-strong: linear-gradient(150deg, rgba(110, 145, 255, 0.18), rgba(200, 16, 46, 0.10));
+  --radial-a: rgba(155, 22, 44, 0.42);
+  --radial-b: rgba(29, 78, 216, 0.44);
   --blob-1: #a1122f;
   --blob-2: #1d4ed8;
   --blob-3: #27417f;
   --blob-opacity: 0.34;
   --accent: #9fb4e8;
+  --accent-a: #e01835;
+  --accent-b: #2f63f0;
   --primary-a: #c8102e;
   --primary-b: #1d4ed8;
   --primary-hover-a: #e01835;
@@ -842,6 +849,22 @@ textarea.editor {
 [data-theme="prime"] .orb {
   color: #e01835;
   text-shadow: 0 0 18px rgba(224, 24, 53, 0.65);
+}
+/* Bold surfaces: .glass-panel/.topnav bake their own white-alpha gradient,
+   so re-tint them directly — panels must read royal blue, not black. */
+[data-theme="prime"] .glass-panel,
+[data-theme="prime"] .topnav {
+  background:
+    linear-gradient(150deg, rgba(110, 145, 255, 0.16), rgba(200, 16, 46, 0.07)),
+    var(--panel-under);
+  border-color: rgba(120, 150, 235, 0.22);
+}
+[data-theme="prime"] .glass-panel::before {
+  background: linear-gradient(180deg, rgba(140, 170, 255, 0.15), transparent 26%);
+}
+[data-theme="prime"] .ssb-item.active {
+  background: linear-gradient(90deg, rgba(200, 16, 46, 0.20), rgba(29, 78, 216, 0.26));
+  border-color: rgba(120, 150, 235, 0.38);
 }
 
 /* Prime easter eggs — only while the Prime theme is active */
