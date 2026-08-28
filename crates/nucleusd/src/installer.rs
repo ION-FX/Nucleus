@@ -423,7 +423,15 @@ async fn fetch_cf_file(
     }
     let resp = req.send().await.context("download request")?;
     if !resp.status().is_success() {
-        bail!("HTTP {}", resp.status());
+        let st = resp.status();
+        if st.as_u16() == 403 && api_key.is_none() {
+            bail!(
+                "HTTP 403 — CurseForge's public endpoint refused this download; \
+                 set curseforge_api_key in daemon.toml (free at console.curseforge.com) \
+                 for reliable installs"
+            );
+        }
+        bail!("HTTP {st}");
     }
     let final_url = resp.url().to_string();
     let bytes = resp

@@ -866,6 +866,31 @@ textarea.editor {
   background: linear-gradient(90deg, rgba(200, 16, 46, 0.20), rgba(29, 78, 216, 0.26));
   border-color: rgba(120, 150, 235, 0.38);
 }
+/* Red gradient headings + a Prime emblem watermark on the server rail. */
+[data-theme="prime"] .page-head h1,
+[data-theme="prime"] .srv-hero h1 {
+  background: linear-gradient(92deg, #ff4d5e, #7d9bff 82%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+[data-theme="prime"] .srv-hero {
+  box-shadow:
+    0 24px 60px -28px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 2px 0 rgba(224, 24, 53, 0.4);
+}
+[data-theme="prime"] .ssb-head {
+  border-bottom: 1px solid rgba(224, 24, 53, 0.45);
+}
+[data-theme="prime"] .srv-sidebar {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0%200%20100%20100'%3E%3Cg fill='%23ffffff' opacity='.15'%3E%3Cpath d='M50%203%2090%2016v37c0%2022-18%2037-40%2044C28%2090%2010%2075%2010%2053V16Z' fill='none' stroke='%23ffffff' stroke-width='5'/%3E%3Cpath d='M50%2013%2078%2022v17H61L50%2029%2039%2039H22V22Z'/%3E%3Crect x='26' y='49' width='15' height='11' rx='2'/%3E%3Crect x='59' y='49' width='15' height='11' rx='2'/%3E%3Cpath d='M41%2067h18l-9%2012z'/%3E%3C/g%3E%3C/svg%3E")
+      no-repeat bottom 14px center / 72% auto,
+    linear-gradient(150deg, rgba(110, 145, 255, 0.16), rgba(200, 16, 46, 0.07)),
+    var(--panel-under);
+}
 
 /* Prime easter eggs — only while the Prime theme is active */
 .prime-quote {
