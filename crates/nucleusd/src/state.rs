@@ -236,18 +236,58 @@ pub fn save_registry(cfg: &Config, servers: &DashMap<String, Arc<ServerRuntime>>
         .iter()
         .map(|e| (e.key().clone(), e.value().spec.clone()))
         .collect();
-    let path = cfg.data_dir.join("servers.json");
-    if let Ok(json) = serde_json::to_string_pretty(&specs) {
-        let _ = std::fs::create_dir_all(&cfg.data_dir);
-        let _ = std::fs::write(path, json);
+    write_json_with_backup(&cfg.data_dir.join("servers.json"), &specs);
+}
+
+/// Write JSON atomically (tmp + rename) and keep a `.bak` of the previous
+/// good copy. A daemon killed mid-write used to corrupt/truncate the file and
+/// silently forget every server on the next boot.
+pub(crate) fn write_json_with_backup<T: serde::Serialize>(path: &std::path::Path, val: &T) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if path.exists() {
+        let mut bak = path.as_os_str().to_os_string();
+        bak.push(".bak");
+        let _ = std::fs::copy(path, &bak);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if let Ok(json) = serde_json::to_string_pretty(val) {
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, path);
+        }
     }
 }
 
+/// Read JSON, falling back to the `.bak` twin on corruption; a file that is
+/// corrupt in both copies is preserved as `.corrupt` for inspection.
+pub(crate) fn read_json_with_backup<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    what: &str,
+) -> Option<T> {
+    let mut bak = path.as_os_str().to_os_string();
+    bak.push(".bak");
+    let backup = std::path::PathBuf::from(bak);
+    for candidate in [path, &backup] {
+        if let Ok(raw) = std::fs::read_to_string(candidate) {
+            match serde_json::from_str(&raw) {
+                Ok(v) => return Some(v),
+                Err(e) => {
+                    tracing::error!(file = %candidate.display(), error = %e, "{what} file is corrupt");
+                    if candidate == path {
+                        let mut corrupt = path.as_os_str().to_os_string();
+                        corrupt.push(".corrupt");
+                        let _ = std::fs::copy(path, &corrupt);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn load_registry(cfg: &Config) -> BTreeMap<String, CreateServerRequest> {
-    let path = cfg.data_dir.join("servers.json");
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+    read_json_with_backup(&cfg.data_dir.join("servers.json"), "server registry")
         .unwrap_or_default()
 }
 

@@ -862,24 +862,21 @@ fn scripts_path(cfg: &crate::config::Config) -> PathBuf {
 }
 
 pub fn store_script(cfg: &crate::config::Config, id: &str, s: StoredScript) {
-    let mut all: std::collections::BTreeMap<String, StoredScript> =
-        std::fs::read_to_string(scripts_path(cfg))
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
+    let mut all: std::collections::BTreeMap<String, StoredScript> = crate::state::read_json_with_backup(
+        &scripts_path(cfg),
+        "install scripts",
+    )
+    .unwrap_or_default();
     all.insert(id.to_string(), s);
-    if let Ok(json) = serde_json::to_string_pretty(&all) {
-        let _ = std::fs::create_dir_all(&cfg.data_dir);
-        let _ = std::fs::write(scripts_path(cfg), json);
-    }
+    crate::state::write_json_with_backup(&scripts_path(cfg), &all);
 }
 
 pub fn load_script(cfg: &crate::config::Config, id: &str) -> Option<StoredScript> {
-    let all: std::collections::BTreeMap<String, StoredScript> =
-        std::fs::read_to_string(scripts_path(cfg))
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())?;
-    all.get(id).cloned()
+    crate::state::read_json_with_backup::<std::collections::BTreeMap<String, StoredScript>>(
+        &scripts_path(cfg),
+        "install scripts",
+    )?
+    .remove(id)
 }
 
 /// Run a stored/attached egg install script as a sidecar job, streaming output

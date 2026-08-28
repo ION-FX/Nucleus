@@ -1,10 +1,14 @@
 // Embed the git commit so panel/daemon version skew is detectable at
 // runtime (CARGO_PKG_VERSION alone stays 0.1.0 across builds).
+//
+// No rerun-if-changed directives here on purpose: cargo's default is to
+// rerun this script whenever any package source changes, which keeps
+// NUCLEUS_BUILD_EPOCH accurate per compile. Pinning it to specific paths
+// left the epoch stale and mis-ranked on-disk static assets against the
+// embedded ones.
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
     let sha = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()

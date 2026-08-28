@@ -884,12 +884,23 @@ textarea.editor {
 [data-theme="prime"] .ssb-head {
   border-bottom: 1px solid rgba(224, 24, 53, 0.45);
 }
-[data-theme="prime"] .srv-sidebar {
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0%200%20100%20100'%3E%3Cg fill='%23ffffff' opacity='.15'%3E%3Cpath d='M50%203%2090%2016v37c0%2022-18%2037-40%2044C28%2090%2010%2075%2010%2053V16Z' fill='none' stroke='%23ffffff' stroke-width='5'/%3E%3Cpath d='M50%2013%2078%2022v17H61L50%2029%2039%2039H22V22Z'/%3E%3Crect x='26' y='49' width='15' height='11' rx='2'/%3E%3Crect x='59' y='49' width='15' height='11' rx='2'/%3E%3Cpath d='M41%2067h18l-9%2012z'/%3E%3C/g%3E%3C/svg%3E")
-      no-repeat bottom 14px center / 72% auto,
-    linear-gradient(150deg, rgba(110, 145, 255, 0.16), rgba(200, 16, 46, 0.07)),
-    var(--panel-under);
+/* The Autobots mark floats at the foot of the server rail; the source PNG
+   has a black backdrop, so screen-blend drops it against the dark panel. */
+[data-theme="prime"] .srv-sidebar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  width: 74%;
+  aspect-ratio: 2 / 1;
+  background: url("/static/prime-emblem.png") no-repeat center / contain;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  pointer-events: none;
+}
+@media (max-width: 940px) {
+  [data-theme="prime"] .srv-sidebar::after { display: none; }
 }
 
 /* Prime easter eggs — only while the Prime theme is active */

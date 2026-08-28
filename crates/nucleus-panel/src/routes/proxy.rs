@@ -35,7 +35,10 @@ async fn daemon_for_server(
     let Some(node) = get_node(app, &srv.node_id) else {
         return Err((StatusCode::BAD_GATEWAY, "node missing").into_response());
     };
-    Ok((srv, DaemonClient::new(app.http.clone(), &node)))
+    let d = DaemonClient::new(app.http.clone(), &node);
+    // Self-heal registry drift (see heal_node_server) before proxying.
+    heal_node_server(app, &srv).await;
+    Ok((srv, d))
 }
 
 pub async fn server_stats(

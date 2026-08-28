@@ -1482,6 +1482,10 @@ pub async fn files_page(
     let (ctx, _srv2, _daemon2) = build_shell(&app, &headers, &id, "files").await?;
     let _ = node2;
 
+    // The node may have lost this server from its registry (crash/corruption);
+    // re-register from the panel DB before listing.
+    heal_node_server(&app, &srv).await;
+
     let path = q.get("path").cloned().unwrap_or_else(|| "/".to_string());
     match d.list_files(&srv.id, Some(&path)).await {
         Ok(entries) => {

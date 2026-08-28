@@ -208,26 +208,30 @@ async fn static_asset(
     AxumPath(path): AxumPath<String>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    // Disk override for dev — but only while the file is NEWER than this
-    // binary. Otherwise fall through to the embedded copy: upgrades must
-    // win over leftovers from an old checkout or release archive.
+    // Embedded copy first: the binary must be self-contained and upgrades
+    // must win over leftovers from an old checkout or release archive.
+    let embedded = StaticAssets::get(&path);
+    // Disk override for dev — only while the file is NEWER than this binary
+    // AND actually differs from the embedded copy (a stale static/ dir with
+    // byte-identical or older files must never shadow the shipped asset).
     let disk = app.cfg.static_dir.join(&path);
-    if let Ok(meta) = tokio::fs::metadata(&disk).await {
-        let newer = meta
-            .modified()
+    if let Ok(bytes) = tokio::fs::read(&disk).await {
+        let differs = embedded
+            .as_ref()
+            .map(|e| e.data.as_ref() != bytes.as_slice())
+            .unwrap_or(true);
+        let newer = tokio::fs::metadata(&disk)
+            .await
             .ok()
+            .and_then(|m| m.modified().ok())
             .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() >= build_epoch())
             .unwrap_or(false);
-        if newer {
-            if let Ok(bytes) = tokio::fs::read(&disk).await {
-                return asset_response(&headers, &path, bytes);
-            }
+        if newer && differs {
+            return asset_response(&headers, &path, bytes);
         }
     }
-    // Fall back to the copy embedded at compile time — makes the binary
-    // self-contained when running outside a source checkout.
-    match StaticAssets::get(&path) {
+    match embedded {
         Some(asset) => asset_response(&headers, &path, asset.data.into_owned()),
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
@@ -285,6 +289,41 @@ pub fn get_node(app: &App, id: &str) -> Option<Node> {
 pub fn daemon_for(app: &App, node_id: &str) -> Result<DaemonClient> {
     let node = get_node(app, node_id).ok_or_else(|| anyhow::anyhow!("node not found"))?;
     Ok(DaemonClient::new(app.http.clone(), &node))
+}
+
+/// If the node lost this server (crashed mid-write corrupted its registry,
+/// or the registry was wiped), re-register it from the panel DB — the row
+/// carries the full spec, and data files on the node survive. No-op when the
+/// node already knows the server. Best-effort: callers proceed either way so
+/// the real operation surfaces the real error.
+pub async fn heal_node_server(app: &App, srv: &ServerRow) {
+    let Ok(d) = daemon_for(app, &srv.node_id) else {
+        return;
+    };
+    if let Err(e) = d.status(&srv.id).await {
+        if !e.to_string().contains("unknown server") {
+            return;
+        }
+        let spec = nucleus_core::CreateServerRequest {
+            id: srv.id.clone(),
+            name: srv.name.clone(),
+            image: srv.image.clone(),
+            startup: srv.startup.clone(),
+            env: serde_json::from_str(&srv.env_json).unwrap_or_default(),
+            ports: serde_json::from_str(&srv.ports_json).unwrap_or_default(),
+            limits: nucleus_core::Limits {
+                mem_mb: srv.mem_mb,
+                cpu_cores: srv.cpu,
+                disk_mb: srv.disk_mb,
+                pids_limit: srv.pids_limit,
+            },
+            stop_command: srv.stop_command.clone(),
+            accept_eula: srv.accept_eula,
+            install_script: None,
+            installer_image: None,
+        };
+        let _ = d.create_server(&spec).await;
+    }
 }
 
 pub fn get_server(app: &App, id: &str) -> Option<ServerRow> {
