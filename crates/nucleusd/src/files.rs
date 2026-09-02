@@ -152,10 +152,55 @@ pub async fn write_file(
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent).await.ok();
     }
-    tokio::fs::write(&target, &body)
-        .await
-        .with_context(|| format!("writing {path}"))?;
+    if let Err(e) = tokio::fs::write(&target, &body).await {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            // Root-owned target (game wrote the dir/file): stash the upload
+            // in the server root (daemon-writable) and move it into place as
+            // root via the fsop container.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            let tmp_name = format!(".nucleus-upload-{nanos}");
+            tokio::fs::write(root.join(&tmp_name), &body)
+                .await
+                .with_context(|| format!("writing {path}"))?;
+            let rel = target
+                .strip_prefix(&root)
+                .unwrap_or(Path::new(&path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            let parent_rel = match rel.rsplit_once('/') {
+                Some((p, _)) if !p.is_empty() => p.to_string(),
+                _ => String::new(),
+            };
+            let parent = if parent_rel.is_empty() {
+                "/data".to_string()
+            } else {
+                format!("/data/{parent_rel}")
+            };
+            docker_sh(
+                &state,
+                &root,
+                &format!(
+                    "mkdir -p {} && mv -f {} {}",
+                    shq(&parent),
+                    shq(&format!("/data/{tmp_name}")),
+                    shq(&format!("/data/{rel}"))
+                ),
+            )
+            .await
+            .with_context(|| format!("writing root-owned {path}"))?;
+            return Ok(StatusCode::NO_CONTENT);
+        }
+        return Err(anyhow::Error::from(e).context(format!("writing {path}")).into());
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Single-quote for /bin/sh.
+fn shq(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[derive(Deserialize)]

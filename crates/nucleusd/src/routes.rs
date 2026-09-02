@@ -104,6 +104,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
         .nest("/api", api)
+        // Axum's default body cap is 2MB, which silently bricked file
+        // uploads/pack installs over the panel (413 mid-buffer). Match the
+        // panel's 1GB ceiling.
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
 }
 
