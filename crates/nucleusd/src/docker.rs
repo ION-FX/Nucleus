@@ -335,7 +335,13 @@ pub async fn remove_server(state: Arc<AppState>, id: &str, purge_data: bool) -> 
             Some(rt) => rt.server_dir(&state.cfg),
             None => state.cfg.servers_dir().join(id),
         };
-        let _ = tokio::fs::remove_dir_all(dir).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                // Root-owned game files: wipe via a throwaway container.
+                let _ = crate::files::docker_remove(&state, &dir, "").await;
+            }
+        }
+        let _ = std::fs::remove_dir(&dir);
     }
     Ok(())
 }

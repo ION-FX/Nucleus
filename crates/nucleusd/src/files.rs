@@ -259,12 +259,100 @@ pub async fn delete(
         return Err(anyhow!("cannot delete server root").into());
     }
     let res = if target.is_dir() {
-        tokio::fs::remove_dir_all(target).await
+        tokio::fs::remove_dir_all(&target).await
     } else {
-        tokio::fs::remove_file(target).await
+        tokio::fs::remove_file(&target).await
     };
-    res.with_context(|| format!("deleting {}", req.path))?;
+    if let Err(e) = res {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            // Game containers run as root, so files they wrote are
+            // root-owned and the daemon user can't unlink them. Remove via a
+            // throwaway container bind-mounted over the server dir.
+            let rel = target
+                .strip_prefix(&root)
+                .unwrap_or(Path::new(&req.path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            docker_remove(&state, &root, &rel)
+                .await
+                .with_context(|| format!("deleting root-owned {}", req.path))?;
+            return Ok(StatusCode::NO_CONTENT);
+        }
+        return Err(anyhow::Error::from(e)
+            .context(format!("deleting {}", req.path))
+            .into());
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Remove `rel` under `root` (or everything under `root` when `rel` is empty)
+/// using a busybox container. The container is labeled `nucleus.oneoff` so
+/// boot reconciliation reaps it if the daemon dies mid-delete.
+pub(crate) async fn docker_remove(state: &AppState, root: &Path, rel: &str) -> Result<()> {
+    const IMG: &str = "busybox:latest";
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let name = format!("nucleus-fsop-{nanos}");
+    if !crate::docker::image_exists(&state.docker, IMG).await {
+        crate::docker::pull_image(&state.docker, IMG).await?;
+    }
+    let (entrypoint, cmd): (Vec<String>, Vec<String>) = if rel.is_empty() {
+        (
+            vec!["/bin/sh".into(), "-c".into()],
+            vec![format!("rm -rf -- /data/* /data/.[!.]*")],
+        )
+    } else {
+        // Pass the path as an argv element: no shell quoting pitfalls.
+        (vec!["rm".into()], vec!["-rf".into(), "--".into(), format!("/data/{rel}")])
+    };
+    let cfg = bollard::container::Config {
+        image: Some(IMG.into()),
+        entrypoint: Some(entrypoint),
+        cmd: Some(cmd),
+        host_config: Some(bollard::secret::HostConfig {
+            binds: Some(vec![format!("{}:/data", root.display())]),
+            ..Default::default()
+        }),
+        labels: Some(
+            [("nucleus.oneoff", "fsop")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    state
+        .docker
+        .create_container(
+            Some(bollard::container::CreateContainerOptions {
+                name: name.clone(),
+                platform: None,
+            }),
+            cfg,
+        )
+        .await
+        .context("creating fsop container")?;
+    state
+        .docker
+        .start_container(&name, None::<bollard::container::StartContainerOptions<String>>)
+        .await?;
+    use futures_util::StreamExt;
+    let mut wait = state
+        .docker
+        .wait_container(&name, None::<bollard::container::WaitContainerOptions<String>>);
+    while let Some(st) = wait.next().await {
+        st.map_err(|e| anyhow!("fsop container failed: {e}"))?;
+    }
+    let _ = state
+        .docker
+        .remove_container(&name, Some(bollard::container::RemoveContainerOptions {
+            force: true,
+            ..Default::default()
+        }))
+        .await;
+    Ok(())
 }
 
 pub async fn rename(

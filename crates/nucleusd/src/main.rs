@@ -37,6 +37,13 @@ async fn main() -> Result<()> {
     let bind = cfg.bind.clone();
     let data_dir = cfg.data_dir.clone();
 
+    if cfg.data_dir.starts_with(std::path::Path::new("/tmp")) {
+        tracing::warn!(
+            data_dir = %cfg.data_dir.display(),
+            "data_dir is under /tmp — server files will NOT survive a reboot; move data_dir to persistent storage"
+        );
+    }
+
     let docker = bollard::Docker::connect_with_local_defaults()
         .map_err(|e| anyhow::anyhow!("connecting to Docker: {e}"))?;
 
