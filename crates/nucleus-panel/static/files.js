@@ -164,10 +164,9 @@
     if (!confirm("Delete " + paths.length + " item(s)?")) return;
     var done = 0;
     paths.forEach(function (p) {
-      var fd = new FormData();
-      fd.append("path", p);
-      fetch("/servers/" + SID + "/files/delete", { method: "POST", body: fd })
-        .finally(function () { done++; if (done === paths.length) { toast("Deleted"); setTimeout(refresh, 600); } });
+      api("/files/delete", { path: p })
+        .then(function () { done++; if (done === paths.length) { toast("Deleted"); setTimeout(refresh, 600); } })
+        .catch(function (e) { done++; toast("Error: " + e.message, "error"); });
     });
   });
 

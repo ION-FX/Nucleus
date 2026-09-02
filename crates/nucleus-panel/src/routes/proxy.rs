@@ -374,15 +374,14 @@ pub async fn file_download(
 
 #[derive(serde::Deserialize)]
 pub struct MkdirForm {
-    pub dir: String,
-    pub cwd: String,
+    pub path: String,
 }
 
 pub async fn files_mkdir(
     State(app): State<SharedApp>,
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
-    Form(form): Form<MkdirForm>,
+    axum::Json(req): axum::Json<MkdirForm>,
 ) -> Response {
     let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
@@ -390,7 +389,7 @@ pub async fn files_mkdir(
     let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
         return (StatusCode::NOT_FOUND, "no such server").into_response();
     };
-    let path = join_path(&form.cwd, &form.dir);
+    let path = req.path;
     if let Err(e) = d.mkdir(&srv.id, &path).await {
         return (StatusCode::BAD_GATEWAY, format!("mkdir failed: {e:#}")).into_response();
     }
@@ -411,7 +410,7 @@ pub async fn files_delete(
     State(app): State<SharedApp>,
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
-    Form(form): Form<DeleteFileForm>,
+    axum::Json(form): axum::Json<DeleteFileForm>,
 ) -> Response {
     let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
@@ -423,11 +422,7 @@ pub async fn files_delete(
         return (StatusCode::BAD_GATEWAY, format!("delete failed: {e:#}")).into_response();
     }
     crate::perms::record(&app.db, &user.email, "file.delete", &id, "");
-    Redirect::to(&format!(
-        "/servers/{id}/files?path={}",
-        urlencoding::encode(&parent_dir(&form.path))
-    ))
-    .into_response()
+    axum::Json(serde_json::json!({"ok": true})).into_response()
 }
 
 pub async fn files_upload(
@@ -770,7 +765,7 @@ pub async fn files_fetch(
     State(app): State<SharedApp>,
     AxumPath(id): AxumPath<String>,
     headers: HeaderMap,
-    Form(form): Form<FetchFileForm>,
+    axum::Json(form): axum::Json<FetchFileForm>,
 ) -> Response {
     let Some(user) = require_perm(&app, &headers, &id, "files") else {
         return Redirect::to("/login").into_response();
