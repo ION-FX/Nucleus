@@ -526,13 +526,78 @@ async fn graceful_stop(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
         .await;
 }
 
+/// Minecraft-family servers read their listen port from `server.properties`
+/// in the data dir; modpack server packs ship it as 25565, which never
+/// matches the allocated mapping and leaves the server unjoinable (the
+/// proxy accepts, then finds nothing on the container port). Point the file
+/// at the first mapped container port before every start. Best-effort.
+async fn sync_minecraft_port(state: &AppState, rt: &ServerRuntime) {
+    let Some(p) = rt.spec.ports.first() else { return };
+    let dir = rt.server_dir(&state.cfg);
+    let props = dir.join("server.properties");
+    if !props.exists() {
+        return;
+    }
+    let port = p.container;
+    let direct = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sync_props_file(&props, port)
+    }));
+    let outcome = match direct {
+        Ok(res) => res,
+        Err(_) => return,
+    };
+    match outcome {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Root-owned pack files: sed them via a throwaway container.
+            let script = format!(
+                "sed -i -E 's/^server-port=.*/server-port={port}/; s/^server-ip=.*/server-ip=/' /data/server.properties"
+            );
+            if let Err(e) = crate::files::docker_sh(&state, &dir, &script).await {
+                tracing::warn!(server = %rt.spec.id, error = %e, "could not sync server.properties port");
+            } else {
+                tracing::info!(server = %rt.spec.id, port, "server.properties port synced (root-owned file)");
+            }
+        }
+        Err(e) => {
+            tracing::debug!(server = %rt.spec.id, error = %e, "server.properties sync skipped");
+        }
+    }
+}
+
+fn sync_props_file(props: &std::path::Path, port: u16) -> std::io::Result<()> {
+    let content = std::fs::read_to_string(props)?;
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut changed = false;
+    for line in content.lines() {
+        if line.starts_with("server-port=") {
+            let want = format!("server-port={port}");
+            if line != want {
+                changed = true;
+            }
+            out.push_str(&want);
+            out.push('\n');
+        } else if line.starts_with("server-ip=") && line != "server-ip=" {
+            // A pinned server-ip (e.g. 127.0.0.1) breaks joins; bind wildcard.
+            changed = true;
+            out.push_str("server-ip=\n");
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if changed {
+        std::fs::write(props, out)?;
+    }
+    Ok(())
+}
+
 pub async fn power(
     state: Arc<AppState>,
     id: &str,
     action: PowerAction,
     _command: Option<String>,
-) -> Result<()> {
-    let rt = state.get(id)?;
+) -> Result<()> {    let rt = state.get(id)?;
     let name = container_name(id);
     match action {
         PowerAction::Start => {
@@ -540,6 +605,7 @@ pub async fn power(
                 return Err(anyhow!("already running"));
             }
             *rt.exit_code.lock().unwrap() = None;
+            sync_minecraft_port(&state, &rt).await;
 
             let (host_config, exposed) = build_host_config(&state, &rt).await?;
 

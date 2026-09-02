@@ -285,6 +285,68 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Run a shell snippet in a busybox container bind-mounted at `root:/data`.
+/// Used for fs operations the daemon user can't perform on root-owned game
+/// files. The container is labeled `nucleus.oneoff` so boot reconciliation
+/// reaps it if the daemon dies mid-operation.
+pub(crate) async fn docker_sh(state: &AppState, root: &Path, script: &str) -> Result<()> {
+    const IMG: &str = "busybox:latest";
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let name = format!("nucleus-fsop-{nanos}");
+    if !crate::docker::image_exists(&state.docker, IMG).await {
+        crate::docker::pull_image(&state.docker, IMG).await?;
+    }
+    let cfg = bollard::container::Config {
+        image: Some(IMG.into()),
+        entrypoint: Some(vec!["/bin/sh".into(), "-c".into()]),
+        cmd: Some(vec![script.to_string()]),
+        host_config: Some(bollard::secret::HostConfig {
+            binds: Some(vec![format!("{}:/data", root.display())]),
+            ..Default::default()
+        }),
+        labels: Some(
+            [("nucleus.oneoff", "fsop")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    state
+        .docker
+        .create_container(
+            Some(bollard::container::CreateContainerOptions {
+                name: name.clone(),
+                platform: None,
+            }),
+            cfg,
+        )
+        .await
+        .context("creating fsop container")?;
+    state
+        .docker
+        .start_container(&name, None::<bollard::container::StartContainerOptions<String>>)
+        .await?;
+    use futures_util::StreamExt;
+    let mut wait = state
+        .docker
+        .wait_container(&name, None::<bollard::container::WaitContainerOptions<String>>);
+    while let Some(st) = wait.next().await {
+        st.map_err(|e| anyhow!("fsop container failed: {e}"))?;
+    }
+    let _ = state
+        .docker
+        .remove_container(&name, Some(bollard::container::RemoveContainerOptions {
+            force: true,
+            ..Default::default()
+        }))
+        .await;
+    Ok(())
+}
+
 /// Remove `rel` under `root` (or everything under `root` when `rel` is empty)
 /// using a busybox container. The container is labeled `nucleus.oneoff` so
 /// boot reconciliation reaps it if the daemon dies mid-delete.
