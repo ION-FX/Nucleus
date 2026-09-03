@@ -12,7 +12,7 @@ mod scheduler;
 mod sftp_server;
 mod state;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 
@@ -92,8 +92,34 @@ async fn main() -> Result<()> {
     });
 
     let app = routes::router(st.clone());
-    let listener = tokio::net::TcpListener::bind(&bind).await?;
-    tracing::info!(%bind, "listening");
-    axum::serve(listener, app).await?;
+    if st.cfg.tls.enabled {
+        // The tree enables more than one rustls crypto provider (aws-lc-rs via
+        // axum-server, ring via russh), so pick one explicitly.
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("installing rustls provider");
+        let cert = st
+            .cfg
+            .tls
+            .cert_path
+            .clone()
+            .context("tls.enabled requires tls.cert_path")?;
+        let key = st
+            .cfg
+            .tls
+            .key_path
+            .clone()
+            .context("tls.enabled requires tls.key_path")?;
+        let rustls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
+        let addr: std::net::SocketAddr = bind.parse()?;
+        tracing::info!(%addr, "nucleusd listening (https)");
+        axum_server::bind_rustls(addr, rustls)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        let listener = tokio::net::TcpListener::bind(&bind).await?;
+        tracing::info!(%bind, "listening");
+        axum::serve(listener, app).await?;
+    }
     Ok(())
 }

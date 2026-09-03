@@ -24,7 +24,6 @@ pub async fn api_list_servers(State(app): State<SharedApp>, headers: HeaderMap) 
         return json_err(StatusCode::UNAUTHORIZED, "invalid api key");
     };
     let servers = list_servers(&app);
-    let http = app.http.clone();
     let mut out = Vec::new();
     for s in servers {
         if !perms::has_any_access(&app.db, &u, &s) {
@@ -32,7 +31,7 @@ pub async fn api_list_servers(State(app): State<SharedApp>, headers: HeaderMap) 
         }
         let node_name = get_node(&app, &s.node_id).map(|n| n.name).unwrap_or_default();
         let status = match get_node(&app, &s.node_id) {
-            Some(n) => crate::daemon::DaemonClient::new(http.clone(), &n)
+            Some(n) => crate::daemon::DaemonClient::new(&app, &n)
                 .status(&s.id)
                 .await
                 .ok()
@@ -150,7 +149,7 @@ where
         Some(n) => n,
         None => return json_err(StatusCode::BAD_GATEWAY, "node missing"),
     };
-    let d = crate::daemon::DaemonClient::new(app.http.clone(), &node);
+    let d = crate::daemon::DaemonClient::new(&app, &node);
     f(app, srv, d).await
 }
 

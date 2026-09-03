@@ -18,6 +18,10 @@ pub struct Node {
     #[allow(dead_code)]
     pub token: String,
     pub alias: String,
+    /// Accept self-signed daemon certificates (trust-on-first-use alternative).
+    pub tls_insecure: bool,
+    /// Optional PEM CA bundle for the daemon's certificate.
+    pub tls_ca_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]

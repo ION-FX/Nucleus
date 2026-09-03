@@ -74,6 +74,44 @@ impl Default for SftpConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Serve the API over HTTPS with a rustls-terminated certificate.
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self { enabled: false, cert_path: None, key_path: None }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// Also accept plain `Authorization: Bearer <token>` while migrating the
+    /// panel to signed requests. Set false to require HMAC signatures.
+    #[serde(default = "default_true")]
+    pub allow_bearer: bool,
+    /// Max clock skew (seconds) accepted for signed requests.
+    #[serde(default = "default_skew")]
+    pub max_skew_secs: i64,
+}
+
+fn default_skew() -> i64 {
+    60
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self { allow_bearer: true, max_skew_secs: default_skew() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -88,6 +126,10 @@ pub struct Config {
     pub ai: AiConfig,
     #[serde(default)]
     pub sftp: SftpConfig,
+    #[serde(default)]
+    pub tls: TlsConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 fn default_bind() -> String {

@@ -14,6 +14,16 @@
     <label>Daemon URL <input name="url" placeholder="https://node.example.com:8033" required></label>
     <label>Token <input name="token" required></label>
   </div>
+  <div class="grid2">
+    <label>Trust TLS
+      <select name="tls_insecure">
+        <option value="">Verify certificate</option>
+        <option value="1">Accept self-signed</option>
+      </select>
+    </label>
+    <label>CA bundle path <span class="muted">(optional, on this panel host)</span>
+      <input name="tls_ca_path" placeholder="/etc/nucleus/node-ca.pem"></label>
+  </div>
   <button class="btn btn-primary">Add node</button>
 </form>
 </section>
@@ -22,15 +32,34 @@
   <tbody>
   {% for n in nodes %}
     <tr>
-      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="name" value="{{ n.name }}" size="12" required></form></td>
-      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="url" value="{{ n.url }}" size="26" required></form></td>
-      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit"><input name="alias" value="{{ n.alias }}" placeholder="play.example.com" size="16"></form></td>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit">
+        <input type="hidden" name="token" value="{{ n.token }}">
+        <input type="hidden" name="alias" value="{{ n.alias }}">
+        <input type="hidden" name="tls_insecure" value="{% if n.tls_insecure %}1{% endif %}">
+        <input type="hidden" name="tls_ca_path" value="{{ n.tls_ca_path }}">
+        <input name="name" value="{{ n.name }}" size="12" required></form></td>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit">
+        <input type="hidden" name="name" value="{{ n.name }}">
+        <input type="hidden" name="token" value="{{ n.token }}">
+        <input type="hidden" name="alias" value="{{ n.alias }}">
+        <input type="hidden" name="tls_insecure" value="{% if n.tls_insecure %}1{% endif %}">
+        <input type="hidden" name="tls_ca_path" value="{{ n.tls_ca_path }}">
+        <input name="url" value="{{ n.url }}" size="26" required></form></td>
+      <td><form method="post" action="/admin/nodes/{{ n.id }}/edit">
+        <input type="hidden" name="name" value="{{ n.name }}">
+        <input type="hidden" name="url" value="{{ n.url }}">
+        <input type="hidden" name="token" value="{{ n.token }}">
+        <input type="hidden" name="tls_insecure" value="{% if n.tls_insecure %}1{% endif %}">
+        <input type="hidden" name="tls_ca_path" value="{{ n.tls_ca_path }}">
+        <input name="alias" value="{{ n.alias }}" placeholder="play.example.com" size="16"></form></td>
       <td><span class="dot {{ n.status_class }}"></span> {{ n.status_text }}</td>
       <td>
         <form method="post" action="/admin/nodes/{{ n.id }}/edit" class="inline node-edit">
           <input type="hidden" name="name" value="{{ n.name }}">
           <input type="hidden" name="url" value="{{ n.url }}">
           <input type="hidden" name="alias" value="{{ n.alias }}">
+          <input type="hidden" name="tls_insecure" value="{% if n.tls_insecure %}1{% endif %}">
+          <input type="hidden" name="tls_ca_path" value="{{ n.tls_ca_path }}">
           <input name="token" value="{{ n.token }}" size="20" required title="daemon token — Save applies all fields in this row">
           <button class="btn btn-sm btn-primary">Save</button>
         </form>

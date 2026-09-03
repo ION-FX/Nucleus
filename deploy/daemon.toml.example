@@ -1,9 +1,30 @@
 # Nucleus daemon configuration (/etc/nucleus/daemon.toml)
 
 bind = "0.0.0.0:8033"
-# Shared secret the panel must present as `Authorization: Bearer <token>`.
+# Shared secret shared with the panel. Presented as a bearer token, or (once
+# [auth] allow_bearer is disabled) as a fresh HMAC signature per request.
 token = "CHANGE-ME-long-random-string"
 data_dir = "/var/lib/nucleus"
+
+# TLS for the daemon API. Generate a keypair with:
+#   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+#     -keyout daemon-key.pem -out daemon-cert.pem -days 825 -nodes \
+#     -subj "/CN=your-node-hostname" -addext "subjectAltName=DNS:your-node-hostname,IP:203.0.113.10"
+# Then register the node in the panel with https:// and either point the
+# node's "CA bundle path" at daemon-cert.pem, or tick "Accept self-signed".
+[tls]
+enabled = false
+cert_path = "/etc/nucleus/daemon-cert.pem"
+key_path = "/etc/nucleus/daemon-key.pem"
+
+# Request authentication. allow_bearer = true accepts plain bearer tokens
+# (fine on localhost/trusted LANs). For nodes reachable from the internet,
+# set allow_bearer = false so every request must carry a fresh HMAC
+# signature (X-Nucleus-Timestamp / X-Nucleus-Signature, ±max_skew_secs).
+# Body integrity is provided by TLS.
+[auth]
+allow_bearer = true
+max_skew_secs = 60
 
 # Optional: improves CurseForge mod resolution (https://console.curseforge.com)
 # Accepts a literal key or env:CF_API_KEY to read from the environment.

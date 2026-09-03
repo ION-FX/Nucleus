@@ -35,7 +35,7 @@ async fn daemon_for_server(
     let Some(node) = get_node(app, &srv.node_id) else {
         return Err((StatusCode::BAD_GATEWAY, "node missing").into_response());
     };
-    let d = DaemonClient::new(app.http.clone(), &node);
+    let d = DaemonClient::new(&app, &node);
     // Self-heal registry drift (see heal_node_server) before proxying.
     heal_node_server(app, &srv).await;
     Ok((srv, d))
@@ -194,8 +194,8 @@ pub async fn transfer_server(
     let Some(target) = get_node(&app, &form.target_node) else {
         return Redirect::to(&format!("/servers/{id}/settings?msg={}", urlencoding::encode("Unknown target node."))).into_response();
     };
-    let src = DaemonClient::new(app.http.clone(), &get_node(&app, &srv.node_id).unwrap());
-    let dst = DaemonClient::new(app.http.clone(), &target);
+    let src = DaemonClient::new(&app, &get_node(&app, &srv.node_id).unwrap());
+    let dst = DaemonClient::new(&app, &target);
 
     // 1) stop the source container so we get a consistent snapshot.
     let _ = src.power(&srv.id, nucleus_core::PowerAction::Stop).await;
@@ -284,20 +284,30 @@ async fn relay(socket: WebSocket, d: DaemonClient, server_id: String) {
         Ok(r) => r,
         Err(_) => return,
     };
-    let auth =
-        match tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&d.auth_header_value()) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-    req.headers_mut().insert("authorization", auth);
-
-    let (upstream, _resp) = match tokio_tungstenite::connect_async(req).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = %e, %url, "console upstream connect failed");
-            return;
-        }
+    // Sign the handshake path the same way REST calls are signed.
+    let hand_path = match url.find("/api/") {
+        Some(i) => url[i..].to_string(),
+        None => return,
     };
+    for (k, v) in d.ws_auth_headers("GET", &hand_path) {
+        match tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&v) {
+            Ok(hv) => {
+                req.headers_mut().insert(k, hv);
+            }
+            Err(_) => return,
+        }
+    }
+
+    let (upstream, _resp) =
+        match tokio_tungstenite::connect_async_tls_with_config(req, None, false, d.ws_connector())
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, %url, "console upstream connect failed");
+                return;
+            }
+        };
 
     let (mut client_tx, mut client_rx) = socket.split();
     let (mut up_tx, mut up_rx) = upstream.split();
@@ -1046,15 +1056,9 @@ pub async fn backup_download(
     let Some(node) = get_node(&app, &srv.node_id) else {
         return (StatusCode::BAD_GATEWAY, "node missing").into_response();
     };
-    let d = DaemonClient::new(app.http.clone(), &node);
+    let d = DaemonClient::new(&app, &node);
     let url = d.backup_download_url(&srv.id, &q.bid);
-    let client = reqwest::Client::new();
-    let resp = match client
-        .get(url)
-        .bearer_auth(d.auth_header_value())
-        .send()
-        .await
-    {
+    let resp = match d.get_stream(&url).await {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
             return (

@@ -31,17 +31,70 @@ pub struct PurgeQuery {
 }
 
 async fn auth(State(state): State<Arc<AppState>>, req: Request<Body>, next: Next) -> Response {
-    let expected = format!("Bearer {}", state.cfg.token);
-    let ok = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
+    if state.cfg.auth.allow_bearer {
+        let expected = format!("Bearer {}", state.cfg.token);
+        let ok = req
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v == expected)
+            .unwrap_or(false);
+        if ok {
+            return next.run(req).await;
+        }
+    }
+    if verify_signature(&state.cfg.token, &state.cfg.auth.max_skew_secs, &req) {
+        return next.run(req).await;
+    }
+    (StatusCode::UNAUTHORIZED, "{\"error\":\"unauthorized\"}").into_response()
+}
+
+/// Constant-time check of `X-Nucleus-Signature` =
+/// hex(HMAC-SHA256(token, "{timestamp}.{METHOD}.{path-with-query}")).
+/// Body bytes are not covered — integrity is TLS's job; this proves the
+/// caller holds the token, freshly, for this exact method and path.
+fn verify_signature(token: &str, max_skew: &i64, req: &Request<Body>) -> bool {
+    use hmac::{Hmac, Mac};
+    let headers = req.headers();
+    let ts: i64 = match headers
+        .get("x-nucleus-timestamp")
         .and_then(|v| v.to_str().ok())
-        .map(|v| v == expected)
-        .unwrap_or(false);
-    if ok {
-        next.run(req).await
-    } else {
-        (StatusCode::UNAUTHORIZED, "{\"error\":\"unauthorized\"}").into_response()
+        .and_then(|v| v.parse().ok())
+    {
+        Some(v) => v,
+        None => return false,
+    };
+    let sig = match headers
+        .get("x-nucleus-signature")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(v) => v,
+        None => return false,
+    };
+    let method = req.method().as_str().to_uppercase();
+    // This middleware runs inside the /api nest, so req.uri() is prefix-
+    // stripped; the panel signed the full request path, so put it back.
+    let path = format!(
+        "/api{}",
+        req.uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_else(|| req.uri().path().to_string())
+    );
+    let now = chrono::Utc::now().timestamp();
+    tracing::debug!(ts, now, %sig, method, %path, "signature check");
+    if (now - ts).abs() > *max_skew {
+        return false;
+    }
+    let mut mac = match Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(format!("{ts}.{method}.{path}").as_bytes());
+    match hex::decode(sig) {
+        // verify_slice compares in constant time.
+        Ok(got) => mac.verify_slice(&got).is_ok(),
+        Err(_) => false,
     }
 }
 

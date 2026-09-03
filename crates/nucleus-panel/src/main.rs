@@ -20,6 +20,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // The dep tree pulls in more than one rustls crypto provider (ring via
+    // tokio-tungstenite/reqwest, aws-lc-rs via our direct rustls dep), so a
+    // provider must be picked explicitly before any TLS client is built.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -45,6 +49,7 @@ async fn main() -> Result<()> {
         http: reqwest::Client::builder()
             .user_agent("nucleus-panel/0.1")
             .build()?,
+        node_clients: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     let router = routes::router(app);

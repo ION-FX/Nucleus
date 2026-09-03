@@ -125,6 +125,8 @@ impl Db {
                 "ALTER TABLE servers ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE servers ADD COLUMN backup_retention INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE servers ADD COLUMN backup_quiesce TEXT",
+                "ALTER TABLE nodes ADD COLUMN tls_insecure INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE nodes ADD COLUMN tls_ca_path TEXT",
             ] {
                 let _ = c.execute(col, []); // ignore if already present
             }

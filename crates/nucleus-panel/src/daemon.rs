@@ -9,21 +9,80 @@ pub struct DaemonClient {
     http: reqwest::Client,
     base: String,
     token: String,
+    tls_insecure: bool,
+    tls_ca_path: Option<String>,
 }
 
 impl DaemonClient {
-    pub fn new(http: reqwest::Client, node: &Node) -> Self {
+    pub fn new(app: &crate::routes::App, node: &Node) -> Self {
         Self {
-            http,
+            http: app.node_client(node),
             base: node.url.trim_end_matches('/').to_string(),
             token: node.token.clone(),
+            tls_insecure: node.tls_insecure,
+            tls_ca_path: node.tls_ca_path.clone(),
         }
     }
 
+    fn sign(&self, method: &str, path: &str, ts: i64) -> String {
+        use hmac::{Hmac, Mac};
+        let mut mac = match Hmac::<sha2::Sha256>::new_from_slice(self.token.as_bytes()) {
+            Ok(m) => m,
+            Err(_) => return String::new(),
+        };
+        mac.update(format!("{ts}.{}.{path}", method.to_uppercase()).as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    /// Auth headers for a raw handshake (WebSocket upgrade) to `path`.
+    pub fn ws_auth_headers(&self, method: &str, path: &str) -> Vec<(&'static str, String)> {
+        let ts = chrono::Utc::now().timestamp();
+        vec![
+            ("authorization", format!("Bearer {}", self.token)),
+            ("x-nucleus-timestamp", ts.to_string()),
+            ("x-nucleus-signature", self.sign(method, path, ts)),
+        ]
+    }
+
+    /// TLS connector for the WebSocket handshake when the node uses custom
+    /// trust; None lets tungstenite use its default webpki-roots stack.
+    pub fn ws_connector(&self) -> Option<tokio_tungstenite::Connector> {
+        if !self.tls_insecure && self.tls_ca_path.is_none() {
+            return None;
+        }
+        let config = if self.tls_insecure {
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(std::sync::Arc::new(AcceptAnyVerifier))
+                .with_no_client_auth()
+        } else {
+            let mut roots = rustls::RootCertStore::empty();
+            if let Some(ca) = &self.tls_ca_path {
+                let pem = std::fs::read(ca).unwrap_or_default();
+                let mut rd = std::io::BufReader::new(pem.as_slice());
+                for cert in rustls_pemfile::certs(&mut rd).flatten() {
+                    let _ = roots.add(cert);
+                }
+            }
+            if roots.is_empty() {
+                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            }
+            rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth()
+        };
+        Some(tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(
+            config,
+        )))
+    }
+
     fn req(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+        let ts = chrono::Utc::now().timestamp();
         self.http
-            .request(method, format!("{}{path}", self.base))
+            .request(method.clone(), format!("{}{path}", self.base))
             .bearer_auth(&self.token)
+            .header("x-nucleus-timestamp", ts.to_string())
+            .header("x-nucleus-signature", self.sign(method.as_str(), path, ts))
             .timeout(std::time::Duration::from_secs(30))
     }
 
@@ -285,8 +344,18 @@ impl DaemonClient {
         format!("{}/api/servers/{id}/backups/{bid}", self.base)
     }
 
-    pub fn auth_header_value(&self) -> String {
-        format!("Bearer {}", self.token)
+    /// Long-timeout authenticated GET for streaming large payloads (backups).
+    pub async fn get_stream(&self, url: &str) -> reqwest::Result<reqwest::Response> {
+        let path = url.strip_prefix(self.base.as_str()).unwrap_or(url);
+        let ts = chrono::Utc::now().timestamp();
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .header("x-nucleus-timestamp", ts.to_string())
+            .header("x-nucleus-signature", self.sign("GET", path, ts))
+            .timeout(std::time::Duration::from_secs(3600))
+            .send()
+            .await
     }
 
     pub fn ws_console_url(&self, id: &str) -> String {
@@ -474,4 +543,55 @@ async fn parse<T: serde::de::DeserializeOwned>(r: reqwest::Response) -> Result<T
         anyhow::bail!("HTTP {status}: {text}");
     }
     r.json().await.context("decoding daemon response")
+}
+
+/// Cert verifier that accepts anything — only used when an admin explicitly
+/// marks a node `tls_insecure` (self-signed daemon certificates).
+#[derive(Debug)]
+struct AcceptAnyVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for AcceptAnyVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme as S;
+        vec![
+            S::RSA_PKCS1_SHA256,
+            S::RSA_PKCS1_SHA384,
+            S::RSA_PKCS1_SHA512,
+            S::RSA_PSS_SHA256,
+            S::RSA_PSS_SHA384,
+            S::RSA_PSS_SHA512,
+            S::ECDSA_NISTP256_SHA256,
+            S::ECDSA_NISTP384_SHA384,
+            S::ED25519,
+        ]
+    }
 }

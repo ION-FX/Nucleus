@@ -18,9 +18,49 @@ pub struct App {
     pub cfg: Config,
     pub db: Db,
     pub http: reqwest::Client,
+    /// Per-node HTTP clients for nodes with custom TLS trust (insecure/CA);
+    /// keyed by node id + trust settings, built lazily.
+    pub node_clients:
+        std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
 }
 
 impl App {
+    pub fn node_client(&self, node: &crate::models::Node) -> reqwest::Client {
+        if !node.tls_insecure && node.tls_ca_path.is_none() {
+            return self.http.clone();
+        }
+        let key = format!(
+            "{}|{}|{}",
+            node.id,
+            node.tls_insecure,
+            node.tls_ca_path.as_deref().unwrap_or("")
+        );
+        if let Some(c) = self.node_clients.lock().unwrap().get(&key) {
+            return c.clone();
+        }
+        let mut b = reqwest::Client::builder();
+        if node.tls_insecure {
+            b = b.danger_accept_invalid_certs(true);
+        }
+        if let Some(ca) = &node.tls_ca_path {
+            match std::fs::read(ca) {
+                Ok(pem) => match reqwest::Certificate::from_pem(&pem) {
+                    Ok(cert) => b = b.add_root_certificate(cert),
+                    Err(e) => tracing::warn!(path = %ca, error = %e, "bad CA pem"),
+                },
+                Err(e) => tracing::warn!(path = %ca, error = %e, "cannot read CA pem"),
+            }
+        }
+        let client = b
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        self.node_clients
+            .lock()
+            .unwrap()
+            .insert(key, client.clone());
+        client
+    }
+
     /// True until the first account exists; afterwards registration is closed.
     pub fn needs_bootstrap(&self) -> Result<bool> {
         self.db.with(|c| {
@@ -264,8 +304,9 @@ pub fn admin_guard(app: &App, headers: &HeaderMap) -> Result<User, Response> {
 pub fn list_nodes(app: &App) -> Vec<Node> {
     app.db
         .with(|c| {
-            let mut stmt =
-                c.prepare("SELECT id, name, url, token, alias FROM nodes ORDER BY name")?;
+            let mut stmt = c.prepare(
+                "SELECT id, name, url, token, alias, tls_insecure, tls_ca_path FROM nodes ORDER BY name",
+            )?;
             let rows = stmt
                 .query_map([], |r| {
                     Ok(Node {
@@ -274,6 +315,8 @@ pub fn list_nodes(app: &App) -> Vec<Node> {
                         url: r.get(2)?,
                         token: r.get(3)?,
                         alias: r.get(4)?,
+                        tls_insecure: r.get::<_, i64>(5)? != 0,
+                        tls_ca_path: r.get(6)?,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -289,7 +332,7 @@ pub fn get_node(app: &App, id: &str) -> Option<Node> {
 
 pub fn daemon_for(app: &App, node_id: &str) -> Result<DaemonClient> {
     let node = get_node(app, node_id).ok_or_else(|| anyhow::anyhow!("node not found"))?;
-    Ok(DaemonClient::new(app.http.clone(), &node))
+    Ok(DaemonClient::new(app, &node))
 }
 
 /// If the node lost this server (crashed mid-write corrupted its registry,

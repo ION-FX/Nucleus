@@ -23,6 +23,8 @@ pub struct NodeView {
     #[allow(dead_code)]
     pub token: String,
     pub alias: String,
+    pub tls_insecure: bool,
+    pub tls_ca_path: String,
     pub status_class: String,
     pub status_text: String,
 }
@@ -45,7 +47,7 @@ pub async fn nodes_page(
     }
     let mut nodes = Vec::new();
     for n in list_nodes(&app) {
-        let client = DaemonClient::new(app.http.clone(), &n);
+        let client = DaemonClient::new(&app, &n);
         let online = tokio::time::timeout(std::time::Duration::from_secs(4), client.health())
             .await
             .map(|r| r.is_ok())
@@ -61,6 +63,8 @@ pub async fn nodes_page(
             url: n.url.clone(),
             token: n.token.clone(),
             alias: n.alias.clone(),
+            tls_insecure: n.tls_insecure,
+            tls_ca_path: n.tls_ca_path.clone().unwrap_or_default(),
             status_class,
             status_text,
         });
@@ -88,6 +92,10 @@ pub struct NodeForm {
     pub token: String,
     #[serde(default)]
     pub alias: Option<String>,
+    #[serde(default)]
+    pub tls_insecure: Option<String>,
+    #[serde(default)]
+    pub tls_ca_path: Option<String>,
 }
 
 pub async fn nodes_add(
@@ -102,13 +110,15 @@ pub async fn nodes_add(
     let id = nucleus_core::new_server_id();
     let res = app.db.with(|c| {
         c.execute(
-            "INSERT INTO nodes (id, name, url, token, created_at) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT INTO nodes (id, name, url, token, created_at, tls_insecure, tls_ca_path) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             rusqlite::params![
                 id,
                 form.name.trim(),
                 url,
                 form.token.trim(),
-                chrono::Utc::now().timestamp()
+                chrono::Utc::now().timestamp(),
+                matches!(form.tls_insecure.as_deref(), Some("1") | Some("true") | Some("on")) as i64,
+                form.tls_ca_path.as_deref().map(str::trim).filter(|s| !s.is_empty()),
             ],
         )?;
         Ok(())
@@ -267,6 +277,10 @@ pub struct NodeEditForm {
     pub url: String,
     pub token: String,
     pub alias: String,
+    #[serde(default)]
+    pub tls_insecure: Option<String>,
+    #[serde(default)]
+    pub tls_ca_path: Option<String>,
 }
 
 pub async fn nodes_edit(
@@ -281,8 +295,16 @@ pub async fn nodes_edit(
     let url = form.url.trim_end_matches('/').to_string();
     let res = app.db.with(|c| {
         c.execute(
-            "UPDATE nodes SET name=?1, url=?2, token=?3, alias=?4 WHERE id=?5",
-            rusqlite::params![form.name.trim(), url, form.token.trim(), form.alias.trim(), id],
+            "UPDATE nodes SET name=?1, url=?2, token=?3, alias=?4, tls_insecure=?5, tls_ca_path=?6 WHERE id=?7",
+            rusqlite::params![
+                form.name.trim(),
+                url,
+                form.token.trim(),
+                form.alias.trim(),
+                matches!(form.tls_insecure.as_deref(), Some("1") | Some("true") | Some("on")) as i64,
+                form.tls_ca_path.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+                id
+            ],
         )?;
         Ok(())
     });
@@ -988,7 +1010,7 @@ async fn collect_node_stats(app: &App) -> (Vec<NodeDash>, FleetStats) {
     let mut dashes: Vec<NodeDash> = Vec::new();
     let clients: Vec<DaemonClient> = nodes
         .iter()
-        .map(|n| DaemonClient::new(app.http.clone(), n))
+        .map(|n| DaemonClient::new(&app, n))
         .collect();
     let mut futs = Vec::new();
     for d in &clients {

@@ -326,7 +326,7 @@ pub async fn dashboard(
             .unwrap_or_else(|| "?".into());
         let st = match &node {
             Some(n) => {
-                let client = DaemonClient::new(app.http.clone(), n);
+                let client = DaemonClient::new(&app, n);
                 match tokio::time::timeout(std::time::Duration::from_secs(4), client.status(&s.id))
                     .await
                 {
@@ -838,7 +838,7 @@ async fn build_shell(
             .into_response());
     }
     let node = get_node(app, &srv.node_id);
-    let daemon = node.as_ref().map(|n| DaemonClient::new(app.http.clone(), n));
+    let daemon = node.as_ref().map(|n| DaemonClient::new(&app, n));
 
     let (running, status_class, status_text) = match &daemon {
         Some(d) => match tokio::time::timeout(
@@ -1486,7 +1486,7 @@ pub async fn files_page(
     let Some(node) = get_node(&app, &srv.node_id) else {
         return Err((StatusCode::BAD_GATEWAY, "node missing").into_response());
     };
-    let d = DaemonClient::new(app.http.clone(), &node);
+    let d = DaemonClient::new(&app, &node);
 
     let node2 = node.clone();
     let (ctx, _srv2, _daemon2) = build_shell(&app, &headers, &id, "files").await?;
