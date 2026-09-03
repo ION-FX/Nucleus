@@ -80,6 +80,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/servers/{id}/backups/create", post(proxy::backup_create))
         .route("/servers/{id}/backups/delete", post(proxy::backup_delete))
         .route("/servers/{id}/backups/restore", post(proxy::backup_restore))
+        .route("/servers/{id}/backups/policy", post(proxy::backup_policy))
         .route(
             "/servers/{id}/backups/download",
             get(proxy::backup_download),
@@ -321,6 +322,8 @@ pub async fn heal_node_server(app: &App, srv: &ServerRow) {
             accept_eula: srv.accept_eula,
             install_script: None,
             installer_image: None,
+            backup_retention: srv.backup_retention,
+            backup_quiesce: srv.quiesce_flag(),
         };
         let _ = d.create_server(&spec).await;
     }
@@ -332,7 +335,8 @@ pub fn get_server(app: &App, id: &str) -> Option<ServerRow> {
             let mut stmt = c.prepare(
                 r#"SELECT id, name, node_id, egg_slug, image, startup, env_json,
                           ports_json, mem_mb, cpu, disk_mb, pids_limit, tags,
-                          stop_command, accept_eula, owner_id
+                          stop_command, accept_eula, owner_id,
+                          backup_retention, backup_quiesce
                    FROM servers WHERE id = ?1"#,
             )?;
             let row = stmt.query_map([id], map_server_row)?.next().transpose()?;
@@ -360,6 +364,8 @@ fn map_server_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRow> {
         stop_command: r.get(13)?,
         accept_eula: r.get::<_, i64>(14)? != 0,
         owner_id: r.get(15)?,
+        backup_retention: r.get::<_, i64>(16)? as u32,
+        backup_quiesce: r.get(17)?,
     })
 }
 
@@ -369,7 +375,8 @@ pub fn list_servers(app: &App) -> Vec<ServerRow> {
             let mut stmt = c.prepare(
                 r#"SELECT id, name, node_id, egg_slug, image, startup, env_json,
                           ports_json, mem_mb, cpu, disk_mb, pids_limit, tags,
-                          stop_command, accept_eula, owner_id
+                          stop_command, accept_eula, owner_id,
+                          backup_retention, backup_quiesce
                    FROM servers ORDER BY created_at DESC"#,
             )?;
             let rows = stmt

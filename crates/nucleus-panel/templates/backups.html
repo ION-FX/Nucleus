@@ -24,4 +24,25 @@
     </tbody>
   </table>
 </section>
+
+<section class="glass-panel" style="margin-top:18px;">
+  <h2 style="margin-top:0;">Backup policy</h2>
+  <form method="post" action="/servers/{{ shell.id }}/backups/policy" data-ajax data-ajax-ok="Policy saved" style="display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap;">
+    <div style="min-width:200px;">
+      <label for="retention">Keep last</label>
+      <input id="retention" name="retention" type="number" min="0" max="1000" value="{{ retention }}" style="max-width:120px;">
+      <div class="small muted" style="margin-top:5px;">0 = keep everything. Older backups are pruned automatically.</div>
+    </div>
+    <div style="min-width:200px;">
+      <label for="quiesce">Save world first</label>
+      <select id="quiesce" name="quiesce" style="max-width:180px;">
+        <option value="auto" {% if quiesce == "auto" %}selected{% endif %}>Auto (Minecraft only)</option>
+        <option value="on" {% if quiesce == "on" %}selected{% endif %}>Always (run save-all)</option>
+        <option value="off" {% if quiesce == "off" %}selected{% endif %}>Never</option>
+      </select>
+      <div class="small muted" style="margin-top:5px;">Ask a running server to flush its world to disk before archiving.</div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save policy</button>
+  </form>
+</section>
 {% endblock %}

@@ -61,6 +61,9 @@ pub fn decode_exit_event(code: i64) -> LogEvent {
 
 pub struct ServerRuntime {
     pub spec: CreateServerRequest,
+    /// Live backup policy; mirrored into `spec` at persist time so it can be
+    /// edited while the server is running (a runtime swap would drop state).
+    pub policy: Mutex<BackupPolicy>,
     pub log_tx: broadcast::Sender<LogEvent>,
     pub ring: Mutex<VecDeque<String>>,
     pub stdin: Mutex<Option<StdinSink>>,
@@ -69,10 +72,28 @@ pub struct ServerRuntime {
     pub container_id: Mutex<Option<String>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BackupPolicy {
+    /// Keep at most this many backups (0 = unlimited).
+    pub retention: u32,
+    /// Quiesce before archiving; None = auto-detect Minecraft.
+    pub quiesce: Option<bool>,
+}
+
+impl BackupPolicy {
+    pub fn from_spec(spec: &CreateServerRequest) -> Self {
+        Self {
+            retention: spec.backup_retention,
+            quiesce: spec.backup_quiesce,
+        }
+    }
+}
+
 impl ServerRuntime {
     pub fn new(spec: CreateServerRequest) -> Self {
         let (log_tx, _) = broadcast::channel(1024);
         Self {
+            policy: Mutex::new(BackupPolicy::from_spec(&spec)),
             spec,
             log_tx,
             ring: Mutex::new(VecDeque::new()),
@@ -234,7 +255,13 @@ impl AppState {
 pub fn save_registry(cfg: &Config, servers: &DashMap<String, Arc<ServerRuntime>>) {
     let specs: BTreeMap<String, CreateServerRequest> = servers
         .iter()
-        .map(|e| (e.key().clone(), e.value().spec.clone()))
+        .map(|e| {
+            let mut spec = e.value().spec.clone();
+            let policy = e.value().policy.lock().unwrap();
+            spec.backup_retention = policy.retention;
+            spec.backup_quiesce = policy.quiesce;
+            (e.key().clone(), spec)
+        })
         .collect();
     write_json_with_backup(&cfg.data_dir.join("servers.json"), &specs);
 }

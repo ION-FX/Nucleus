@@ -123,6 +123,8 @@ impl Db {
                 "ALTER TABLE servers ADD COLUMN disk_mb INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE servers ADD COLUMN pids_limit INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE servers ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE servers ADD COLUMN backup_retention INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE servers ADD COLUMN backup_quiesce TEXT",
             ] {
                 let _ = c.execute(col, []); // ignore if already present
             }

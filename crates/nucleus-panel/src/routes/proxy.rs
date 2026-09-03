@@ -228,6 +228,8 @@ pub async fn transfer_server(
         accept_eula: srv.accept_eula,
         install_script: None,
         installer_image: None,
+        backup_retention: srv.backup_retention,
+        backup_quiesce: srv.quiesce_flag(),
     };
     if let Err(e) = dst.create_server(&spec).await {
         // try to roll the source back up
@@ -908,6 +910,65 @@ pub async fn backup_create(
         )
             .into_response(),
     }
+}
+
+/// Save the backup policy (retention + quiesce) on the panel row and push it
+/// to the node; applies live, no restart needed.
+pub async fn backup_policy(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    form: axum::Form<std::collections::HashMap<String, String>>,
+) -> Response {
+    let Some(user) = require_perm(&app, &headers, &id, "backups") else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(srv) = get_server(&app, &id) else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    let retention = form
+        .get("retention")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let quiesce = match form.get("quiesce").map(String::as_str) {
+        Some("on") => Some("on".to_string()),
+        Some("off") => Some("off".to_string()),
+        _ => None, // auto
+    };
+    if app
+        .db
+        .with(|c| {
+            c.execute(
+                "UPDATE servers SET backup_retention=?1, backup_quiesce=?2 WHERE id=?3",
+                rusqlite::params![
+                    retention,
+                    quiesce.as_deref().unwrap_or("auto"),
+                    srv.id
+                ],
+            )?;
+            Ok(())
+        })
+        .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("could not save policy — <a href='/servers/{id}/backups'>back</a>"),
+        )
+            .into_response();
+    }
+    // Mirror the daemon-side runtime policy (drives pruning + quiesce there,
+    // including schedule-triggered backups).
+    if let Ok((_, d)) = daemon_for_server(&app, &id).await {
+        let body = serde_json::json!({
+            "backup_retention": retention,
+            "backup_quiesce": quiesce.as_deref().unwrap_or("auto"),
+        });
+        if let Err(e) = d.update_config(&srv.id, &body).await {
+            tracing::warn!(server = %srv.id, error = %e, "could not push backup policy to node");
+        }
+    }
+    crate::perms::record(&app.db, &user.email, "backup.policy", &id, "");
+    Redirect::to(&format!("/servers/{id}/backups")).into_response()
 }
 
 #[derive(serde::Deserialize)]

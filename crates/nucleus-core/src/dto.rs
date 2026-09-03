@@ -66,6 +66,12 @@ pub struct CreateServerRequest {
     /// Image for the sidecar (defaults to the server image).
     #[serde(default)]
     pub installer_image: Option<String>,
+    /// Keep at most this many backups (0 = unlimited).
+    #[serde(default)]
+    pub backup_retention: u32,
+    /// Quiesce (in-game save) before archiving; None = auto-detect Minecraft.
+    #[serde(default)]
+    pub backup_quiesce: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

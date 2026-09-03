@@ -686,6 +686,8 @@ pub async fn server_create(
         accept_eula: val(&form, "accept_eula") == "1",
         install_script,
         installer_image,
+        backup_retention: 0,
+        backup_quiesce: None,
     };
 
     let created = daemon
@@ -959,6 +961,8 @@ pub struct BackupsTmpl {
     pub backups: Vec<BackupView>,
     pub user_email: String,
     pub is_admin: bool,
+    pub retention: u32,
+    pub quiesce: String,
 }
 
 pub async fn backups_page(
@@ -978,11 +982,17 @@ pub async fn backups_page(
             download_url: format!("/servers/{}/backups/download?bid={}", srv.id, b.id),
         })
         .collect();
+    let (user_email, is_admin) = nav_ctx(&app, &headers);
     Ok(page(&BackupsTmpl {
         shell,
         backups,
-        user_email: nav_ctx(&app, &headers).0,
-        is_admin: nav_ctx(&app, &headers).1,
+        user_email,
+        is_admin,
+        retention: srv.backup_retention,
+        quiesce: srv
+            .backup_quiesce
+            .clone()
+            .unwrap_or_else(|| "auto".to_string()),
     }))
 }
 

@@ -45,4 +45,19 @@ pub struct ServerRow {
     pub stop_command: Option<String>,
     pub accept_eula: bool,
     pub owner_id: Option<i64>,
+    /// Keep at most this many backups (0 = unlimited).
+    pub backup_retention: u32,
+    /// "auto" (None), "on", "off" — quiesce before archiving.
+    pub backup_quiesce: Option<String>,
+}
+
+impl ServerRow {
+    /// "on"/"off"/"auto" → the daemon's Option<bool> (None = auto-detect).
+    pub fn quiesce_flag(&self) -> Option<bool> {
+        match self.backup_quiesce.as_deref() {
+            Some("on") => Some(true),
+            Some("off") => Some(false),
+            _ => None,
+        }
+    }
 }

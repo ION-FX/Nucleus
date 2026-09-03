@@ -86,8 +86,69 @@ pub fn backups_root(state: &AppState, id: &str) -> PathBuf {
     state.cfg.backups_dir().join(id)
 }
 
+/// If the policy asks for it (or auto-detects Minecraft via server.properties),
+/// ask a running game to flush its world to disk before archiving, so the
+/// backup captures a consistent world instead of mid-tick state.
+async fn quiesce_for_backup(state: &Arc<AppState>, rt: &Arc<crate::state::ServerRuntime>) {
+    let quiesce = match rt.policy.lock().unwrap().quiesce {
+        Some(v) => v,
+        None => rt.server_dir(&state.cfg).join("server.properties").exists(),
+    };
+    if !quiesce || !rt.running.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    rt.push_log("[nucleus] quiescing server (save-all) before backup");
+    let before: std::collections::HashSet<String> = rt.recent_logs(40).into_iter().collect();
+    if crate::docker::send_command(state.clone(), &rt.spec.id, "save-all flush")
+        .await
+        .is_err()
+    {
+        rt.push_log("[nucleus] could not send save-all; backing up as-is");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        return;
+    }
+    // A fresh "Saved the game" line confirms the flush; without one, wait a
+    // fixed grace period rather than archiving instantly.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let now = rt.recent_logs(40);
+        if now
+            .iter()
+            .any(|l| l.contains("Saved the game") && !before.contains(l))
+        {
+            rt.push_log("[nucleus] world saved; creating backup");
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    rt.push_log("[nucleus] save-all not confirmed; backing up anyway");
+    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+}
+
+/// Enforce the retention policy: keep the newest `keep` backups, prune the rest.
+async fn prune_old_backups(state: &Arc<AppState>, rt: &Arc<crate::state::ServerRuntime>) {
+    let keep = rt.policy.lock().unwrap().retention;
+    if keep == 0 {
+        return;
+    }
+    let id = rt.spec.id.clone();
+    let Ok(list) = list_backups(state.clone(), id.clone()).await else {
+        return;
+    };
+    for b in list.iter().skip(keep as usize) {
+        let path = backups_root(state, &id).join(format!("{}.tar.gz", b.id));
+        if tokio::fs::remove_file(&path).await.is_ok() {
+            rt.push_log(&format!("[nucleus] pruned old backup {}", b.id));
+        }
+    }
+}
+
 pub async fn create_backup(state: Arc<AppState>, id: String) -> Result<BackupInfo> {
     let rt = state.get(&id)?;
+    quiesce_for_backup(&state, &rt).await;
     let src = rt.server_dir(&state.cfg);
     let dest_dir = backups_root(&state, &id);
     tokio::fs::create_dir_all(&dest_dir).await?;
@@ -111,6 +172,7 @@ pub async fn create_backup(state: Arc<AppState>, id: String) -> Result<BackupInf
     .map_err(|e| anyhow::anyhow!("join error {e}"))??;
 
     let md = std::fs::metadata(&dest)?;
+    prune_old_backups(&state, &rt).await;
     Ok(BackupInfo {
         id: backup_id,
         size: md.len(),

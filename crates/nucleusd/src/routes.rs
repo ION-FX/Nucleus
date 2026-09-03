@@ -251,6 +251,11 @@ struct ConfigUpdate {
     limits: Option<nucleus_core::Limits>,
     #[serde(default)]
     ports: Option<Vec<nucleus_core::PortMapping>>,
+    /// "auto" (None), "on" (Some(true)), "off" (Some(false)).
+    #[serde(default)]
+    backup_quiesce: Option<String>,
+    #[serde(default)]
+    backup_retention: Option<u32>,
 }
 
 async fn update_config(
@@ -261,34 +266,59 @@ async fn update_config(
     let Ok(old) = state.get(&id) else {
         return err(anyhow::anyhow!("unknown server {id}"));
     };
-    if old.running.load(std::sync::atomic::Ordering::Relaxed) {
+
+    // Backup policy is live runtime state (no container rebuild), so it may
+    // change while the server runs; container-affecting fields may not.
+    let touches_container = req.name.is_some()
+        || req.image.is_some()
+        || req.startup.is_some()
+        || req.stop_command.is_some()
+        || req.limits.is_some()
+        || req.ports.is_some();
+    if touches_container && old.running.load(std::sync::atomic::Ordering::Relaxed) {
         return err(anyhow::anyhow!("stop the server before editing its config"));
     }
 
-    let mut spec = old.spec.clone();
-    if let Some(n) = req.name {
-        spec.name = n;
-    }
-    if let Some(i) = req.image {
-        spec.image = i;
-    }
-    if let Some(s) = req.startup {
-        spec.startup = s;
-    }
-    if let Some(sc) = req.stop_command {
-        spec.stop_command = sc;
-    }
-    if let Some(l) = req.limits {
-        spec.limits = l;
-    }
-    if let Some(p) = req.ports {
-        spec.ports = p;
+    {
+        let mut policy = old.policy.lock().unwrap();
+        if let Some(r) = req.backup_retention {
+            policy.retention = r;
+        }
+        if let Some(q) = req.backup_quiesce.as_deref() {
+            policy.quiesce = match q {
+                "on" => Some(true),
+                "off" => Some(false),
+                _ => None,
+            };
+        }
     }
 
-    // Rebuild the runtime entry, carrying over console history.
-    let new_rt = std::sync::Arc::new(crate::state::ServerRuntime::new(spec));
-    *new_rt.ring.lock().unwrap() = old.ring.lock().unwrap().clone();
-    state.servers.insert(id.clone(), new_rt);
+    if touches_container {
+        let mut spec = old.spec.clone();
+        if let Some(n) = req.name {
+            spec.name = n;
+        }
+        if let Some(i) = req.image {
+            spec.image = i;
+        }
+        if let Some(s) = req.startup {
+            spec.startup = s;
+        }
+        if let Some(sc) = req.stop_command {
+            spec.stop_command = sc;
+        }
+        if let Some(l) = req.limits {
+            spec.limits = l;
+        }
+        if let Some(p) = req.ports {
+            spec.ports = p;
+        }
+
+        // Rebuild the runtime entry, carrying over console history.
+        let new_rt = std::sync::Arc::new(crate::state::ServerRuntime::new(spec));
+        *new_rt.ring.lock().unwrap() = old.ring.lock().unwrap().clone();
+        state.servers.insert(id.clone(), new_rt);
+    }
     crate::state::save_registry(&state.cfg, &state.servers);
 
     match state.get(&id) {
