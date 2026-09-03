@@ -6,6 +6,33 @@
   let ws = null;
   let reconnectTimer = null;
 
+  // Buffering keeps us off the per-message layout path: a busy server can
+  // emit hundreds of lines a second, and each full re-wrap of the log inside
+  // a backdrop-blurred panel is expensive. Flush at most ~10x/sec and append
+  // text at the end only, so the browser never re-copies the whole node.
+  const MAX_LOG_CHARS = 512 * 1024;
+  const TRIM_TO_CHARS = 256 * 1024;
+  const FLUSH_MS = 100;
+  let pending = [];
+  let flushTimer = null;
+
+  function flush() {
+    flushTimer = null;
+    if (!pending.length) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    el.insertAdjacentText("beforeend", pending.join("\n") + "\n");
+    pending.length = 0;
+    if (el.textContent.length > MAX_LOG_CHARS) {
+      el.textContent = el.textContent.slice(-TRIM_TO_CHARS);
+    }
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flush, FLUSH_MS);
+  }
+
   function connect() {
     ws = new WebSocket(proto + location.host + window.NUCLEUS_WS);
     ws.onopen = () => line("[connected]");
@@ -28,10 +55,8 @@
   function line(raw) {
     const t = clean(raw);
     if (!t) return;
-    const atBottom =
-      el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
-    el.textContent += t + "\n";
-    if (atBottom) el.scrollTop = el.scrollHeight;
+    pending.push(t);
+    scheduleFlush();
   }
 
   function send() {

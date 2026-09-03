@@ -86,12 +86,15 @@ body {
   position: absolute;
   width: 46vmax; height: 46vmax;
   border-radius: 50%;
-  filter: blur(90px);
+  /* Soft disc baked into a gradient — the old filter: blur(90px) re-filtered
+     a 46vmax layer every frame behind the backdrop-blur glass. */
+  background: radial-gradient(circle closest-side, var(--blob-c) 55%, transparent 92%);
   opacity: var(--blob-opacity);
+  will-change: transform;
 }
-.blob-1 { background: var(--blob-1); top: -18vmax; left: -12vmax; animation: drift1 34s ease-in-out infinite alternate; }
-.blob-2 { background: var(--blob-2); bottom: -22vmax; right: -14vmax; animation: drift2 42s ease-in-out infinite alternate; }
-.blob-3 { background: var(--blob-3); top: 30%; left: 55%; width: 32vmax; height: 32vmax; opacity: 0.22; animation: drift3 50s ease-in-out infinite alternate; }
+.blob-1 { --blob-c: var(--blob-1); top: -18vmax; left: -12vmax; animation: drift1 34s ease-in-out infinite alternate; }
+.blob-2 { --blob-c: var(--blob-2); bottom: -22vmax; right: -14vmax; animation: drift2 42s ease-in-out infinite alternate; }
+.blob-3 { --blob-c: var(--blob-3); top: 30%; left: 55%; width: 32vmax; height: 32vmax; opacity: 0.22; animation: drift3 50s ease-in-out infinite alternate; }
 @keyframes drift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
 @keyframes drift2 { to { transform: translate(-8vmax, -6vmax) scale(0.92); } }
 @keyframes drift3 { to { transform: translate(-12vmax, 8vmax); } }
@@ -303,6 +306,7 @@ section {
 /* ── status dots & chips ──────────────────────────────────────────────── */
 
 .dot {
+  position: relative;
   display: inline-block;
   width: 9px; height: 9px;
   border-radius: 50%;
@@ -313,16 +317,27 @@ section {
 .dot.green {
   background: var(--green);
   box-shadow: 0 0 9px rgba(76, 212, 149, 0.8), 0 0 0 3px rgba(76, 212, 149, 0.13);
-  animation: pulse-green 2.2s ease-in-out infinite;
+}
+/* Pulse via transform/opacity on a static-glow ring — animating box-shadow
+   repaints (and re-blends the blend-mode surfaces above it) every frame. */
+.dot.green::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(76, 212, 149, 0.9), 0 0 0 5px rgba(76, 212, 149, 0.16);
+  pointer-events: none;
+  opacity: 0.8;
+  animation: pulse-ring 2.2s ease-in-out infinite;
 }
 .dot.red {
   background: var(--red);
   box-shadow: 0 0 9px rgba(240, 104, 124, 0.7), 0 0 0 3px rgba(240, 104, 124, 0.12);
 }
 .dot.grey { background: var(--faint); }
-@keyframes pulse-green {
-  0%, 100% { box-shadow: 0 0 5px rgba(76, 212, 149, 0.6), 0 0 0 3px rgba(76, 212, 149, 0.1); }
-  50%      { box-shadow: 0 0 12px rgba(76, 212, 149, 0.9), 0 0 0 5px rgba(76, 212, 149, 0.16); }
+@keyframes pulse-ring {
+  0%, 100% { opacity: 0.55; transform: scale(0.7); }
+  50%      { opacity: 1;    transform: scale(1.18); }
 }
 
 .chip {
