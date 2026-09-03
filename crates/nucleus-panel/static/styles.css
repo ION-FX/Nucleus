@@ -86,18 +86,16 @@ body {
   position: absolute;
   width: 46vmax; height: 46vmax;
   border-radius: 50%;
-  /* Soft disc baked into a gradient — the old filter: blur(90px) re-filtered
-     a 46vmax layer every frame behind the backdrop-blur glass. */
+  /* Soft disc baked into a gradient. Deliberately static: the old drift made
+     every backdrop-filter surface (the sticky topnav) re-blur at 60fps, which
+     burned constant client CPU on every page. A still backdrop is rasterized
+     once and cached. */
   background: radial-gradient(circle closest-side, var(--blob-c) 55%, transparent 92%);
   opacity: var(--blob-opacity);
-  will-change: transform;
 }
-.blob-1 { --blob-c: var(--blob-1); top: -18vmax; left: -12vmax; animation: drift1 34s ease-in-out infinite alternate; }
-.blob-2 { --blob-c: var(--blob-2); bottom: -22vmax; right: -14vmax; animation: drift2 42s ease-in-out infinite alternate; }
-.blob-3 { --blob-c: var(--blob-3); top: 30%; left: 55%; width: 32vmax; height: 32vmax; opacity: 0.22; animation: drift3 50s ease-in-out infinite alternate; }
-@keyframes drift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
-@keyframes drift2 { to { transform: translate(-8vmax, -6vmax) scale(0.92); } }
-@keyframes drift3 { to { transform: translate(-12vmax, 8vmax); } }
+.blob-1 { --blob-c: var(--blob-1); top: -18vmax; left: -12vmax; }
+.blob-2 { --blob-c: var(--blob-2); bottom: -22vmax; right: -14vmax; }
+.blob-3 { --blob-c: var(--blob-3); top: 30%; left: 55%; width: 32vmax; height: 32vmax; opacity: 0.22; }
 
 /* film grain */
 .grain {
