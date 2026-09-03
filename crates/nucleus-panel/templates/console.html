@@ -68,24 +68,39 @@
 <script>
 (function () {
   var fmt = function (v) { return v >= 1024 ? (v/1024).toFixed(1) + " MB/s" : v.toFixed(1) + " KB/s"; };
+  // Only touch the DOM when a value actually changed — polling rewrites would
+  // repaint the tiles every 2s for identical numbers.
+  var last = {};
+  function set(id, v) {
+    if (last[id] === v) return;
+    last[id] = v;
+    document.getElementById(id).textContent = v;
+  }
+  function setBar(id, v) {
+    var w = Math.max(0, Math.min(100, v)) + "%";
+    if (last[id] === w) return;
+    last[id] = w;
+    document.getElementById(id).style.width = w;
+  }
   async function poll() {
     try {
       const r = await fetch("/servers/{{ shell.id }}/stats");
       const s = await r.json();
       if (!s.running) {
-        document.getElementById("cpu-text").textContent = s.error ? "node offline" : "stopped";
-        document.getElementById("mem-text").textContent = "—";
-        document.getElementById("rx-text").textContent = "—";
-        document.getElementById("tx-text").textContent = "—";
+        set("cpu-text", s.error ? "node offline" : "stopped");
+        set("mem-text", "—");
+        set("rx-text", "—");
+        set("tx-text", "—");
+        setBar("cpu-bar", 0);
+        setBar("mem-bar", 0);
         return;
       }
-      document.getElementById("cpu-text").textContent = s.cpu_percent.toFixed(1) + "%";
-      document.getElementById("cpu-bar").style.width = Math.min(100, s.cpu_percent) + "%";
-      document.getElementById("mem-text").textContent =
-        s.mem_used_mb.toFixed(0) + " / " + s.mem_limit_mb.toFixed(0) + " MB";
-      document.getElementById("mem-bar").style.width = Math.min(100, s.mem_percent) + "%";
-      document.getElementById("rx-text").textContent = "↓ " + fmt(s.net_rx_kbps);
-      document.getElementById("tx-text").textContent = "↑ " + fmt(s.net_tx_kbps);
+      set("cpu-text", s.cpu_percent.toFixed(1) + "%");
+      setBar("cpu-bar", s.cpu_percent);
+      set("mem-text", s.mem_used_mb.toFixed(0) + " / " + s.mem_limit_mb.toFixed(0) + " MB");
+      setBar("mem-bar", s.mem_percent);
+      set("rx-text", "↓ " + fmt(s.net_rx_kbps));
+      set("tx-text", "↑ " + fmt(s.net_tx_kbps));
     } catch (e) {}
   }
   poll();

@@ -15,15 +15,20 @@
   const FLUSH_MS = 100;
   let pending = [];
   let flushTimer = null;
+  let logChars = 0;
 
   function flush() {
     flushTimer = null;
     if (!pending.length) return;
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
-    el.insertAdjacentText("beforeend", pending.join("\n") + "\n");
+    const batch = pending.join("\n") + "\n";
     pending.length = 0;
-    if (el.textContent.length > MAX_LOG_CHARS) {
-      el.textContent = el.textContent.slice(-TRIM_TO_CHARS);
+    el.insertAdjacentText("beforeend", batch);
+    logChars += batch.length;
+    if (logChars > MAX_LOG_CHARS) {
+      const kept = el.textContent.slice(-TRIM_TO_CHARS);
+      el.textContent = kept;
+      logChars = kept.length;
     }
     if (atBottom) el.scrollTop = el.scrollHeight;
   }

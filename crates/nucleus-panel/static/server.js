@@ -28,7 +28,12 @@
     }, 3000);
   }
 
+  var lastRunning = null;
   function syncPowerButtons(running) {
+    // Skip entirely when unchanged: rewriting classes/text on every poll
+    // invalidates paint inside the server rail for no reason.
+    if (running === lastRunning) return;
+    lastRunning = running;
     if (!powerGroup) return;
     powerGroup.dataset.running = running ? "true" : "false";
     var btns = powerGroup.querySelectorAll("button[data-action]");

@@ -142,8 +142,10 @@ code {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent 26%);
-  mix-blend-mode: screen;
+  /* Plain highlight, no mix-blend-mode: a blend forces this panel's whole
+     backdrop to re-process whenever any content inside it changes, which
+     turned every stats poll / console line into a re-blend of the tile. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), transparent 26%);
 }
 
 /* ── nav ──────────────────────────────────────────────────────────────── */
@@ -314,29 +316,16 @@ section {
 }
 .dot.green {
   background: var(--green);
+  /* Static glow, deliberately no pulse: any animation inside the server rail
+     re-processes the blend-mode emblem's backdrop at 60fps for as long as the
+     server is running. */
   box-shadow: 0 0 9px rgba(76, 212, 149, 0.8), 0 0 0 3px rgba(76, 212, 149, 0.13);
-}
-/* Pulse via transform/opacity on a static-glow ring — animating box-shadow
-   repaints (and re-blends the blend-mode surfaces above it) every frame. */
-.dot.green::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  box-shadow: 0 0 12px rgba(76, 212, 149, 0.9), 0 0 0 5px rgba(76, 212, 149, 0.16);
-  pointer-events: none;
-  opacity: 0.8;
-  animation: pulse-ring 2.2s ease-in-out infinite;
 }
 .dot.red {
   background: var(--red);
   box-shadow: 0 0 9px rgba(240, 104, 124, 0.7), 0 0 0 3px rgba(240, 104, 124, 0.12);
 }
 .dot.grey { background: var(--faint); }
-@keyframes pulse-ring {
-  0%, 100% { opacity: 0.55; transform: scale(0.7); }
-  50%      { opacity: 1;    transform: scale(1.18); }
-}
 
 .chip {
   margin-left: auto;
@@ -1168,7 +1157,8 @@ textarea.editor {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
-  transition: width .5s ease;
+  /* No width transition: stats polls every 2s would keep a layout+paint
+     animation running nearly continuously while a server is up. */
 }
 [data-theme="frost"] .bar i { background: linear-gradient(90deg,#5a7bd8,#7d5ad8); }
 
