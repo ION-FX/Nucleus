@@ -468,6 +468,8 @@ impl DaemonClient {
                 Method::POST,
                 &format!("/api/servers/{id}/schedules/{tid}/run"),
             )
+            // Actions like backup execute synchronously and can take minutes.
+            .timeout(std::time::Duration::from_secs(1800))
             .send()
             .await?;
         ensure_ok(r).await
