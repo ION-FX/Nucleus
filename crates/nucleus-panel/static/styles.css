@@ -1423,3 +1423,163 @@ textarea.editor {
   align-items: center;
   margin-bottom: 10px;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   LAYOUTS — classic (default) · rail (side panel) · compact (dense).
+   Selected per browser via the ◤ Layout menu; applied pre-paint from
+   localStorage as <html data-layout="...">. Color themes are orthogonal.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── RAIL ─────────────────────────────────────────────────────────────── */
+
+[data-layout="rail"] .topnav {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  height: 100vh;
+  width: 232px;
+  max-width: none;
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 20px;
+  padding: 20px 12px 16px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--hairline-strong);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+[data-layout="rail"] .brand { padding: 2px 10px; }
+[data-layout="rail"] .nav-links {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+}
+[data-layout="rail"] .nav-links > a {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+[data-layout="rail"] .nav-links > a:hover { background: var(--subtle-bg); color: var(--text); }
+[data-layout="rail"] .nav-links > a::before {
+  font-size: 15px;
+  width: 20px;
+  text-align: center;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+[data-layout="rail"] a[href="/"]::before { content: "▦"; }
+[data-layout="rail"] a[href="/account"]::before { content: "◉"; }
+[data-layout="rail"] a[href="/admin"]::before { content: "✦"; }
+[data-layout="rail"] a[href^="/admin/"]::before { content: "◇"; }
+/* "admin" section label above the first admin link */
+[data-layout="rail"] a[href="/admin"] {
+  position: relative;
+  margin-top: 16px;
+}
+[data-layout="rail"] a[href="/admin"]::after {
+  content: "admin";
+  position: absolute;
+  top: -13px;
+  left: 12px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.8;
+}
+/* push the settings cluster (layout/theme/logout) to the rail's foot */
+[data-layout="rail"] .nav-links > a:last-of-type { margin-bottom: auto; }
+[data-layout="rail"] .theme-wrap { margin: 0; }
+
+[data-layout="rail"] .container {
+  margin-left: 232px;
+  max-width: 1480px;
+  padding: 26px 28px 70px;
+}
+[data-layout="rail"] .srv-sidebar { top: 16px; }
+
+@media (max-width: 1199px) {
+  [data-layout="rail"] .topnav { width: 62px; padding: 14px 8px; gap: 12px; }
+  [data-layout="rail"] .container { margin-left: 86px; padding: 20px 16px 60px; }
+  [data-layout="rail"] .brand { font-size: 0; display: flex; justify-content: center; padding: 0; }
+  [data-layout="rail"] .nav-links { align-items: center; }
+  [data-layout="rail"] .nav-links > a { font-size: 0; gap: 0; justify-content: center; padding: 11px 0; width: 44px; }
+  [data-layout="rail"] .nav-links > a::before { font-size: 17px; }
+  [data-layout="rail"] a[href="/admin"] { margin-top: 10px; }
+  [data-layout="rail"] a[href="/admin"]::after { display: none; }
+  [data-layout="rail"] .theme-wrap,
+  [data-layout="rail"] .nav-links form.inline { display: none; }
+}
+
+@media (max-width: 899px) {
+  [data-layout="rail"] .topnav {
+    position: sticky;
+    top: 10px;
+    bottom: auto;
+    height: auto;
+    width: calc(100% - 32px);
+    margin: 10px auto 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline-strong);
+    overflow: visible;
+  }
+  [data-layout="rail"] .container { margin-left: 0; }
+  [data-layout="rail"] .nav-links { flex-direction: row; align-items: center; width: auto; gap: 12px; flex-wrap: wrap; }
+  [data-layout="rail"] .nav-links > a { font-size: inherit; gap: 6px; padding: 0; width: auto; }
+  [data-layout="rail"] .nav-links > a::before { font-size: 13px; width: auto; }
+  [data-layout="rail"] a[href="/admin"] { margin-top: 0; }
+  [data-layout="rail"] a[href="/admin"]::after { display: none; }
+  [data-layout="rail"] .theme-wrap,
+  [data-layout="rail"] .nav-links form.inline { display: revert; }
+  [data-layout="rail"] .brand { font-size: inherit; justify-content: flex-start; }
+}
+
+/* ── COMPACT ──────────────────────────────────────────────────────────── */
+
+[data-layout="compact"] .container { max-width: 1800px; padding: 16px 20px 46px; }
+[data-layout="compact"] .topnav { padding: 7px 14px; margin-top: 10px; width: calc(100% - 32px); }
+[data-layout="compact"] .page-head { margin-bottom: 0; gap: 8px; }
+[data-layout="compact"] .page-head h1 { font-size: 22px; }
+[data-layout="compact"] .btn { padding: 6px 12px; font-size: 13px; }
+[data-layout="compact"] .btn-sm { padding: 4px 9px; font-size: 12px; }
+[data-layout="compact"] .card, [data-layout="compact"] .details-card { padding: 14px 16px; margin-top: 10px; }
+[data-layout="compact"] .server-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
+[data-layout="compact"] .server-card { padding: 12px 14px; }
+[data-layout="compact"] .table th, [data-layout="compact"] .table td { padding: 6px 10px; }
+[data-layout="compact"] .log { font-size: 11.6px; padding: 10px 12px; }
+[data-layout="compact"] .stat-row { gap: 10px; }
+[data-layout="compact"] .srv-hero { padding: 14px 18px; }
+[data-layout="compact"] .srv-layout { gap: 12px; }
+[data-layout="compact"] .ssb-nav { gap: 1px; }
+[data-layout="compact"] .ssb-item { padding: 6px 9px; font-size: 13px; }
+[data-layout="compact"] h1 { font-size: 24px; }
+[data-layout="compact"] h2 { font-size: 17px; }
+[data-layout="compact"] .console-embed { min-height: 300px; }
+
+/* ── revamp polish ────────────────────────────────────────────────────── */
+
+.page-head {
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--hairline-weak);
+}
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* current page highlighted in the nav */
+.nav-links > a.active { color: var(--text); }
+[data-layout="rail"] .nav-links > a.active { background: var(--subtle-bg); box-shadow: inset 2px 0 0 var(--accent); }

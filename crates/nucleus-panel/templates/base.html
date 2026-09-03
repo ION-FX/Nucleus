@@ -9,6 +9,8 @@
       try {
         var t = localStorage.getItem("nucleus-theme");
         if (t) document.documentElement.dataset.theme = t;
+        var l = localStorage.getItem("nucleus-layout");
+        document.documentElement.dataset.layout = l || "classic";
       } catch (e) {}
     })();
   </script>
@@ -29,6 +31,14 @@
     <a href="/">Servers</a>
     <a href="/account">Account</a>
     {% if is_admin %}<a href="/admin">Dashboard</a><a href="/admin/nodes">Nodes</a><a href="/admin/users">Users</a><a href="/admin/defaults">Defaults</a><a href="/admin/eggs">Eggs</a><a href="/admin/invites">Invites</a><a href="/admin/activity">Activity</a><a href="/admin/update">Update</a>{% endif %}
+    <div class="theme-wrap">
+      <button class="btn btn-sm" id="layout-btn" title="Change layout" aria-haspopup="true">▤ Layout</button>
+      <div class="theme-menu glass-panel" id="layout-menu" hidden>
+        <button data-set-layout="classic"><span class="sw" style="background:linear-gradient(135deg,#3a3d46,#17181c)"></span>Classic <span class="muted small">— top bar</span></button>
+        <button data-set-layout="rail"><span class="sw" style="background:linear-gradient(135deg,#60a5fa,#a78bfa)"></span>Rail <span class="muted small">— side panel</span></button>
+        <button data-set-layout="compact"><span class="sw" style="background:linear-gradient(135deg,#4cd494,#2e8b74)"></span>Compact <span class="muted small">— dense</span></button>
+      </div>
+    </div>
     <div class="theme-wrap">
       <button class="btn btn-sm" id="theme-btn" title="Change theme" aria-haspopup="true">◑ Theme</button>
       <div class="theme-menu glass-panel" id="theme-menu" hidden>
@@ -52,6 +62,43 @@
 </main>
 <script>
 (function () {
+  /* Highlight the nav link for the current section. */
+  var path = location.pathname;
+  document.querySelectorAll(".nav-links > a").forEach(function (a) {
+    var href = a.getAttribute("href");
+    if (!href) return;
+    var active = href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
+    a.classList.toggle("active", active);
+  });
+
+  /* Layout picker — classic top bar, left rail, or compact density. */
+  var root = document.documentElement;
+  var lbtn = document.getElementById("layout-btn");
+  if (lbtn) {
+    var lmenu = document.getElementById("layout-menu");
+    function markLayout() {
+      var cur = root.dataset.layout || "classic";
+      lmenu.querySelectorAll("[data-set-layout]").forEach(function (b) {
+        b.classList.toggle("active", b.dataset.setLayout === cur);
+      });
+    }
+    lbtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      lmenu.hidden = !lmenu.hidden;
+      if (!lmenu.hidden) markLayout();
+    });
+    lmenu.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-set-layout]");
+      if (!b) return;
+      root.dataset.layout = b.dataset.setLayout;
+      try { localStorage.setItem("nucleus-layout", b.dataset.setLayout); } catch (err) {}
+      lmenu.hidden = true;
+    });
+    document.addEventListener("click", function (e) {
+      if (!lmenu.hidden && !lmenu.contains(e.target) && e.target !== lbtn) lmenu.hidden = true;
+    });
+  }
+
   var btn = document.getElementById("theme-btn");
   if (!btn) return;
   var menu = document.getElementById("theme-menu");
