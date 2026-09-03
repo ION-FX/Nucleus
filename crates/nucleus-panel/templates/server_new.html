@@ -50,10 +50,10 @@
   </div>
 
   <div class="grid2">
-    <label>CPU cores <input type="number" step="0.5" name="cpu" value="2" min="0.5"></label>
-    <label>Memory (MB) <input type="number" name="mem_mb" value="4096" min="128"></label>
-    <label>Disk quota (MB, 0=unlimited) <input type="number" name="disk_mb" value="0" min="0" step="512"></label>
-    <label>PID limit (0=unlimited) <input type="number" name="pids_limit" value="0" min="0" step="100"></label>
+    <label>CPU cores <input type="number" step="0.5" name="cpu" value="{{ def_cpu }}" min="0.5"></label>
+    <label>Memory (MB) <input type="number" name="mem_mb" value="{{ def_mem_mb }}" min="128"></label>
+    <label>Disk quota (MB, 0=unlimited) <input type="number" name="disk_mb" value="{{ def_disk_mb }}" min="0" step="512"></label>
+    <label>PID limit (0=unlimited) <input type="number" name="pids_limit" value="{{ def_pids }}" min="0" step="100"></label>
   </div>
   <label>Tags <span class="muted">(comma-separated)</span> <input name="tags" placeholder="survival, pvp"></label>
   <label>Port mappings <span class="muted">(one per line: host:container/proto)</span>

@@ -6,6 +6,42 @@
   let ws = null;
   let reconnectTimer = null;
 
+  // ── console toolbar: autoscroll / clear view / download ─────────────────
+  const autoBtn = document.getElementById("autoscroll");
+  let autoscroll = true;
+  if (autoBtn) {
+    autoBtn.addEventListener("click", () => {
+      autoscroll = !autoscroll;
+      autoBtn.classList.toggle("active", autoscroll);
+      autoBtn.title = autoscroll ? "Auto-scroll on" : "Auto-scroll paused";
+      if (autoscroll) el.scrollTop = el.scrollHeight;
+    });
+  }
+  const clearBtn = document.getElementById("clearview");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      el.textContent = "";
+      pending.length = 0;
+      logChars = 0;
+    });
+  }
+  const dlBtn = document.getElementById("downloadlog");
+  if (dlBtn) {
+    const sid = window.NUCLEUS_WS?.match(/servers\/([^/]+)\/ws/)?.[1];
+    dlBtn.addEventListener("click", async () => {
+      try {
+        const r = await fetch(`/servers/${sid}/logs?tail=50000`);
+        if (!r.ok) return;
+        const blob = new Blob([await r.text()], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `console-${sid || "server"}.log`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (e) {}
+    });
+  }
+
   // Buffering keeps us off the per-message layout path: a busy server can
   // emit hundreds of lines a second, and each full re-wrap of the log inside
   // a backdrop-blurred panel is expensive. Flush at most ~10x/sec and append
@@ -20,7 +56,7 @@
   function flush() {
     flushTimer = null;
     if (!pending.length) return;
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    const atBottom = autoscroll || el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
     const batch = pending.join("\n") + "\n";
     pending.length = 0;
     el.insertAdjacentText("beforeend", batch);

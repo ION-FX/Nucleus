@@ -2,22 +2,40 @@
 {% block server_content %}
 <section class="glass-panel">
   <h2 style="margin-top:0;">Startup &amp; resources</h2>
-  <p class="muted small">Egg: <code>{{ egg_slug }}</code> · changes apply on restart.</p>
+  <p class="muted small">Egg: <code>{{ egg_slug }}</code> · changes apply after a restart. Derived keys (<code>SERVER_MEMORY</code>, <code>SERVER_IP</code>, <code>SERVER_PORT</code>) come from the server config.</p>
   {% if !message.is_empty() %}<p class="muted">{{ message }}</p>{% endif %}
   <form method="post" action="/servers/{{ shell.id }}/startup/save" class="stack">
     <label>Docker image</label>
     <input name="image" value="{{ shell.image }}" required>
     <label>Startup command</label>
     <textarea name="startup" rows="3" spellcheck="false" required>{{ startup_escaped|safe }}</textarea>
-    <div class="grid2">
-      <label>Memory (MB)</label>
-      <label>CPU cores</label>
+
+    {% if !egg_vars.is_empty() %}
+    <div class="vars-head">
+      <h3>Variables</h3>
+      <span class="muted small">Defined by the egg — hover a name for details.</span>
     </div>
-    <div class="grid2">
-      <input type="number" name="mem_mb" value="{{ mem_mb }}" min="128">
-      <input type="number" step="0.5" name="cpu" value="{{ cpu }}" min="0.25">
+    <div class="vars-grid">
+      {% for v in egg_vars %}
+      <label title="{{ v.description }}">
+        <span class="var-name">{{ v.name }} <code class="var-key">{{ v.env_key }}</code></span>
+        <input name="var_{{ v.env_key }}" value="{{ v.value }}" spellcheck="false">
+      </label>
+      {% endfor %}
     </div>
-    <label>Stop command <span class="muted">(empty = docker stop)</span></label>
+    {% endif %}
+
+    <label>Extra environment <span class="muted">(one per line: KEY=VALUE)</span></label>
+    <textarea name="extra_env" rows="3" spellcheck="false" placeholder="TZ=Europe/Stockholm">{{ extra_env }}</textarea>
+
+    <div class="grid4">
+      <label>Memory (MB)<input type="number" name="mem_mb" value="{{ mem_mb }}" min="128"></label>
+      <label>CPU cores<input type="number" step="0.5" name="cpu" value="{{ cpu }}" min="0.25"></label>
+      <label>Disk (MB, 0=∞)<input type="number" name="disk_mb" value="{{ disk_mb }}" min="0" step="512"></label>
+      <label>PID limit (0=∞)<input type="number" name="pids_limit" value="{{ pids_limit }}" min="0" step="100"></label>
+    </div>
+
+    <label>Stop command <span class="muted">(empty = SIGTERM via exec)</span></label>
     <input name="stop_command" value="{{ stop_command }}">
     <button class="btn btn-primary">Save configuration</button>
   </form>

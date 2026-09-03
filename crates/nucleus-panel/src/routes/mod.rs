@@ -121,6 +121,7 @@ pub fn router(app: SharedApp) -> axum::Router {
         .route("/servers/{id}/backups/delete", post(proxy::backup_delete))
         .route("/servers/{id}/backups/restore", post(proxy::backup_restore))
         .route("/servers/{id}/backups/policy", post(proxy::backup_policy))
+        .route("/servers/{id}/logs", get(proxy::server_logs))
         .route(
             "/servers/{id}/backups/download",
             get(proxy::backup_download),

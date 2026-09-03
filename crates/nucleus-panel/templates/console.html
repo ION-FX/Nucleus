@@ -23,6 +23,14 @@
 
 <div class="console-grid">
   <section class="glass-panel" style="padding:20px 22px 22px; margin-top:18px; min-width:0;">
+    <div class="console-head">
+      <h2 style="margin:0;">Console</h2>
+      <div class="console-tools">
+        <button type="button" class="tool-btn active" id="autoscroll" title="Auto-scroll on click; scroll up to pause">▼</button>
+        <button type="button" class="tool-btn" id="clearview" title="Clear this view (does not delete anything)">⌫</button>
+        <button type="button" class="tool-btn" id="downloadlog" title="Download log">⬇</button>
+      </div>
+    </div>
     <pre id="console-log" class="log console-embed"></pre>
     <div class="console-input">
       <input id="cmd" placeholder="Send a command to the server…" autocomplete="off" spellcheck="false">

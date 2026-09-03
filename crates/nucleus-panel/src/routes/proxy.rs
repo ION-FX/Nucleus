@@ -276,6 +276,30 @@ pub async fn ws_relay(
     })
 }
 
+/// Plain-text console log for the current session (console page ⬇ button).
+pub async fn server_logs(
+    State(app): State<SharedApp>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if require_perm(&app, &headers, &id, "console").is_none() {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    let Ok((srv, d)) = daemon_for_server(&app, &id).await else {
+        return (StatusCode::NOT_FOUND, "no such server").into_response();
+    };
+    let tail: usize = q.get("tail").and_then(|t| t.parse().ok()).unwrap_or(20000);
+    match d.logs(&srv.id, tail).await {
+        Ok(text) => (
+            [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            text,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("logs failed: {e:#}")).into_response(),
+    }
+}
+
 async fn relay(socket: WebSocket, d: DaemonClient, server_id: String) {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 

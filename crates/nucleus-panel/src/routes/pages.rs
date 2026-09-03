@@ -378,6 +378,12 @@ pub async fn dashboard(
 
 // ---------- server create ----------
 
+fn def_val<T: std::str::FromStr>(app: &App, key: &str, fallback: T) -> T {
+    crate::routes::admin::get_setting(app, key)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(fallback)
+}
+
 #[derive(Template)]
 #[template(path = "server_new.html")]
 pub struct ServerNewTmpl {
@@ -388,6 +394,10 @@ pub struct ServerNewTmpl {
     pub error: String,
     pub user_email: String,
     pub is_admin: bool,
+    pub def_mem_mb: u64,
+    pub def_cpu: f64,
+    pub def_disk_mb: u64,
+    pub def_pids: i64,
 }
 
 pub struct NodeOpt {
@@ -466,7 +476,11 @@ pub async fn server_new(
         error: String::new(),
         user_email: nav_ctx(&app, &headers).0,
         is_admin: true,
-    }))
+        def_mem_mb: def_val::<u64>(&app, "default_mem_mb", 2048),
+    def_cpu: def_val::<f64>(&app, "default_cpu", 2.0),
+    def_disk_mb: def_val::<u64>(&app, "default_disk_mb", 0),
+    def_pids: def_val::<i64>(&app, "default_pids_limit", 0),
+}))
 }
 
 pub async fn server_create(
@@ -514,6 +528,10 @@ pub async fn server_create(
             error: msg.to_string(),
             user_email: user.email.clone(),
             is_admin: true,
+            def_mem_mb: def_val::<u64>(&app, "default_mem_mb", 2048),
+            def_cpu: def_val::<f64>(&app, "default_cpu", 2.0),
+            def_disk_mb: def_val::<u64>(&app, "default_disk_mb", 0),
+            def_pids: def_val::<i64>(&app, "default_pids_limit", 0),
         })
         .into_response()
     };
@@ -631,10 +649,20 @@ pub async fn server_create(
         });
     }
 
-    let mem_mb = val(&form, "mem_mb").parse::<u64>().unwrap_or(2048).max(128);
-    let cpu = val(&form, "cpu").parse::<f64>().unwrap_or(2.0).max(0.25);
-    let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
-    let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
+    let mem_mb = val(&form, "mem_mb")
+        .parse::<u64>()
+        .unwrap_or(def_val::<u64>(&app, "default_mem_mb", 2048))
+        .max(128);
+    let cpu = val(&form, "cpu")
+        .parse::<f64>()
+        .unwrap_or(def_val::<f64>(&app, "default_cpu", 2.0))
+        .max(0.25);
+    let disk_mb = val(&form, "disk_mb")
+        .parse::<u64>()
+        .unwrap_or(def_val::<u64>(&app, "default_disk_mb", 0));
+    let pids_limit = val(&form, "pids_limit")
+        .parse::<i64>()
+        .unwrap_or(def_val::<i64>(&app, "default_pids_limit", 0));
 
     // Pterodactyl-style built-ins — always derived from server config so
     // templates like `-Xmx{{SERVER_MEMORY}}M` never render empty.
@@ -1168,11 +1196,33 @@ pub struct StartupTmpl {
     pub egg_slug: String,
     pub mem_mb: u64,
     pub cpu: f64,
+    pub disk_mb: u64,
+    pub pids_limit: i64,
     pub stop_command: String,
     pub startup_escaped: String,
     pub message: String,
     pub user_email: String,
     pub is_admin: bool,
+    /// Egg-defined variables with their current values.
+    pub egg_vars: Vec<EggVarRow>,
+    /// Any other environment keys (KEY=VALUE lines).
+    pub extra_env: String,
+}
+
+pub struct EggVarRow {
+    pub env_key: String,
+    pub name: String,
+    pub description: String,
+    pub value: String,
+}
+
+/// Built-in env keys derived from the server config, never user-edited.
+fn builtin_env_keys() -> [&'static str; 3] {
+    ["SERVER_MEMORY", "SERVER_IP", "SERVER_PORT"]
+}
+
+fn server_env(srv: &ServerRow) -> std::collections::BTreeMap<String, String> {
+    serde_json::from_str(&srv.env_json).unwrap_or_default()
 }
 
 pub async fn startup_page(
@@ -1183,16 +1233,62 @@ pub async fn startup_page(
 ) -> Result<Response, Response> {
     let (shell, srv, _daemon) = shell_guard(&app, &headers, &id, "startup").await?;
     let startup_escaped = srv.startup.replace("{{", "&#123;&#123;").replace("}}", "&#125;&#125;");
+    let env = server_env(&srv);
+
+    // Egg variables (if any) rendered as proper inputs, prefilled from env.
+    let egg = srv
+        .egg_slug
+        .as_ref()
+        .and_then(|slug| list_eggs(&app).into_iter().find(|e| &e.slug == slug));
+    let egg_vars = egg
+        .as_ref()
+        .map(|e| {
+            e.egg
+                .variables
+                .iter()
+                .map(|v| EggVarRow {
+                    env_key: v.env_variable.clone(),
+                    name: v.name.clone(),
+                    description: v.description.clone(),
+                    value: env.get(&v.env_variable).cloned().unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Everything else (non-built-in, non-egg) as editable KEY=VALUE lines.
+    let egg_keys: std::collections::HashSet<&str> = egg
+        .as_ref()
+        .map(|e| {
+            e.egg
+                .variables
+                .iter()
+                .map(|v| v.env_variable.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let extra: Vec<String> = env
+        .iter()
+        .filter(|(k, _)| {
+            !egg_keys.contains(k.as_str()) && !builtin_env_keys().contains(&k.as_str())
+        })
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+
     Ok(page(&StartupTmpl {
         startup_escaped,
         egg_slug: srv.egg_slug.clone().unwrap_or_else(|| "custom".into()),
         mem_mb: srv.mem_mb,
         cpu: srv.cpu,
+        disk_mb: srv.disk_mb,
+        pids_limit: srv.pids_limit,
         stop_command: srv.stop_command.clone().unwrap_or_default(),
         message: q.msg.clone().unwrap_or_default(),
         shell,
         user_email: nav_ctx(&app, &headers).0,
         is_admin: nav_ctx(&app, &headers).1,
+        egg_vars,
+        extra_env: extra.join("\n"),
     }))
 }
 
@@ -1202,8 +1298,9 @@ pub async fn startup_save(
     headers: HeaderMap,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Result<Response, Response> {
-    admin_guard(&app, &headers)?;
-    let (shell, _srv, daemon) = shell_guard(&app, &headers, &id, "startup").await?;
+    // Editing startup/limits is "settings"-level; owners, admins and subusers
+    // with the settings flag may do it.
+    let (shell, srv, daemon) = shell_guard(&app, &headers, &id, "settings").await?;
 
     let image = val(&form, "image").trim().to_string();
     let startup = val(&form, "startup");
@@ -1221,11 +1318,52 @@ pub async fn startup_save(
             .into_response());
     }
 
+    // Rebuild the environment exactly the way creation does: egg defaults,
+    // then non-empty var_ overrides, then free-form extra KEY=VALUE lines,
+    // then the derived built-ins.
+    let mut env: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    if let Some(egg) = srv
+        .egg_slug
+        .as_ref()
+        .and_then(|slug| list_eggs(&app).into_iter().find(|e| &e.slug == slug))
+    {
+        for v in &egg.egg.variables {
+            env.insert(v.env_variable.clone(), v.default_value.clone());
+        }
+    }
+    for (k, v) in &form {
+        if let Some(envk) = k.strip_prefix("var_") {
+            if !v.is_empty() {
+                env.insert(envk.to_string(), v.clone());
+            }
+        }
+    }
+    for line in val(&form, "extra_env").lines() {
+        let line = line.trim();
+        if line.is_empty() || !line.contains('=') {
+            continue;
+        }
+        let (k, v) = line.split_once('=').unwrap();
+        let k = k.trim();
+        if k.is_empty() || builtin_env_keys().contains(&k) {
+            continue;
+        }
+        env.insert(k.to_string(), v.trim().to_string());
+    }
+    env.insert("SERVER_MEMORY".to_string(), mem_mb.to_string());
+    env.insert("SERVER_IP".to_string(), "0.0.0.0".to_string());
+    if let Ok(ports) = serde_json::from_str::<Vec<nucleus_core::PortMapping>>(&srv.ports_json) {
+        if let Some(p) = ports.first() {
+            env.insert("SERVER_PORT".to_string(), p.container.to_string());
+        }
+    }
+
     let body = serde_json::json!({
         "image": image,
         "startup": startup,
         "stop_command": stop,
         "limits": {"mem_mb": mem_mb.max(128), "cpu_cores": cpu.max(0.25), "disk_mb": disk_mb, "pids_limit": pids_limit},
+        "env": env,
     });
     daemon
         .update_config(&shell.id, &body)
@@ -1241,8 +1379,18 @@ pub async fn startup_save(
     app.db
         .with(|c| {
             c.execute(
-                "UPDATE servers SET image=?1, startup=?2, stop_command=?3, mem_mb=?4, cpu=?5, disk_mb=?6, pids_limit=?7 WHERE id=?8",
-                rusqlite::params![image, startup, stop, mem_mb as i64, cpu, disk_mb as i64, pids_limit, shell.id],
+                "UPDATE servers SET image=?1, startup=?2, stop_command=?3, mem_mb=?4, cpu=?5, disk_mb=?6, pids_limit=?7, env_json=?8 WHERE id=?9",
+                rusqlite::params![
+                    image,
+                    startup,
+                    stop,
+                    mem_mb as i64,
+                    cpu,
+                    disk_mb as i64,
+                    pids_limit,
+                    serde_json::to_string(&env).unwrap_or_default(),
+                    shell.id
+                ],
             )?;
             Ok(())
         })
@@ -1313,7 +1461,8 @@ pub async fn settings_save(
     headers: HeaderMap,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Result<Response, Response> {
-    admin_guard(&app, &headers)?;
+    // Settings-level permission (owner/admin/subuser with the settings flag).
+    let (_shell, _srv, _daemon) = shell_guard(&app, &headers, &id, "settings").await?;
     let new_name = val(&form, "name").trim().to_string();
     if new_name.is_empty() {
         return Err((
@@ -1325,10 +1474,20 @@ pub async fn settings_save(
     let tags = val(&form, "tags").trim().to_string();
     let (shell, _srv, daemon) = shell_guard(&app, &headers, &id, "settings").await?;
 
-    let mem_mb = val(&form, "mem_mb").parse::<u64>().unwrap_or(2048).max(128);
-    let cpu = val(&form, "cpu").parse::<f64>().unwrap_or(2.0).max(0.25);
-    let disk_mb = val(&form, "disk_mb").parse::<u64>().unwrap_or(0);
-    let pids_limit = val(&form, "pids_limit").parse::<i64>().unwrap_or(0);
+    let mem_mb = val(&form, "mem_mb")
+        .parse::<u64>()
+        .unwrap_or(def_val::<u64>(&app, "default_mem_mb", 2048))
+        .max(128);
+    let cpu = val(&form, "cpu")
+        .parse::<f64>()
+        .unwrap_or(def_val::<f64>(&app, "default_cpu", 2.0))
+        .max(0.25);
+    let disk_mb = val(&form, "disk_mb")
+        .parse::<u64>()
+        .unwrap_or(def_val::<u64>(&app, "default_disk_mb", 0));
+    let pids_limit = val(&form, "pids_limit")
+        .parse::<i64>()
+        .unwrap_or(def_val::<i64>(&app, "default_pids_limit", 0));
 
     let body = serde_json::json!({
         "name": new_name,

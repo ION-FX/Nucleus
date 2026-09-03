@@ -309,6 +309,9 @@ struct ConfigUpdate {
     backup_quiesce: Option<String>,
     #[serde(default)]
     backup_retention: Option<u32>,
+    /// Full replacement of the server's environment (egg variables).
+    #[serde(default)]
+    env: Option<std::collections::BTreeMap<String, String>>,
 }
 
 async fn update_config(
@@ -327,7 +330,8 @@ async fn update_config(
         || req.startup.is_some()
         || req.stop_command.is_some()
         || req.limits.is_some()
-        || req.ports.is_some();
+        || req.ports.is_some()
+        || req.env.is_some();
     if touches_container && old.running.load(std::sync::atomic::Ordering::Relaxed) {
         return err(anyhow::anyhow!("stop the server before editing its config"));
     }
@@ -365,6 +369,9 @@ async fn update_config(
         }
         if let Some(p) = req.ports {
             spec.ports = p;
+        }
+        if let Some(e) = req.env {
+            spec.env = e;
         }
 
         // Rebuild the runtime entry, carrying over console history.

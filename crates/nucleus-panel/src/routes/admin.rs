@@ -740,6 +740,20 @@ pub async fn invites_page(
     page(&t)
 }
 
+/// Best-effort public base URL of this panel, taken from the request the
+/// admin is browsing (honours reverse-proxy X-Forwarded-Proto).
+fn base_url_from_headers(headers: &HeaderMap) -> String {
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    format!("{proto}://{host}")
+}
+
 pub async fn invites_create(
     State(app): State<SharedApp>,
     headers: HeaderMap,
@@ -765,7 +779,7 @@ pub async fn invites_create(
     if res.is_err() {
         return Redirect::to("/admin/invites?err=Could%20not%20create%20invite").into_response();
     }
-    let link = format!("http://localhost:8025/register?invite={}", token);
+    let link = format!("{}/register?invite={}", base_url_from_headers(&headers), token);
     // attempt to mail it if SMTP is configured
     if let Some(smtp) = &app.cfg.smtp {
         if let Ok(body) = build_invite_email(&email, &link, &app.cfg.app_name) {
@@ -850,7 +864,7 @@ pub struct DefaultsTmpl {
     pub is_admin: bool,
 }
 
-fn get_setting(app: &App, key: &str) -> Option<String> {
+pub(crate) fn get_setting(app: &App, key: &str) -> Option<String> {
     app.db
         .with(|c| Ok(c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).ok()))
         .ok()

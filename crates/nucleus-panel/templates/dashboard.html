@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Servers</h1>
-  <a class="btn btn-primary" href="/servers/new">+ New server</a>
+  {% if is_admin %}<a class="btn btn-primary" href="/servers/new">+ New server</a>{% endif %}
 </div>
 
 {% if !all_tags.is_empty() %}
@@ -33,8 +33,13 @@
     <div class="sc-meta">
       <code>{{ s.id }}</code>
       <span class="muted">· {{ s.node_name }}</span>
-      {% if s.running %}<span class="live-stat muted small" data-srv="{{ s.id }}">…</span>{% endif %}
     </div>
+    {% if s.running %}
+    <div class="card-usage">
+      <div class="bar"><i id="usage-{{ s.id }}" style="width:0%"></i></div>
+      <span class="live-stat" data-srv="{{ s.id }}">…</span>
+    </div>
+    {% endif %}
     {% if !s.tags.is_empty() %}
     <div class="sc-tags">
       {% for tag in s.tags.split(",") %}{% if !tag.trim().is_empty() %}<span class="srv-tag" data-tag="{{ tag.trim() }}">{{ tag.trim() }}</span>{% endif %}{% endfor %}
@@ -78,6 +83,28 @@
       if (btn) btn.click();
     });
   });
+
+  // Live CPU/RAM per running server card.
+  var fmtGb = function (mb) { return (mb / 1024).toFixed(1) + "G"; };
+  function pollStats() {
+    document.querySelectorAll(".live-stat[data-srv]").forEach(function (el) {
+      var sid = el.dataset.srv;
+      fetch("/servers/" + sid + "/stats")
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (!s || !s.running) { el.textContent = "stopped"; return; }
+          el.textContent = "CPU " + s.cpu_percent.toFixed(0) + "% · " +
+            fmtGb(s.mem_used_mb) + "/" + fmtGb(s.mem_limit_mb);
+          var bar = document.getElementById("usage-" + sid);
+          if (bar) {
+            bar.style.width = Math.max(2, Math.min(100, s.cpu_percent)) + "%";
+          }
+        })
+        .catch(function () {});
+    });
+  }
+  pollStats();
+  setInterval(pollStats, 5000);
 })();
 </script>
 {% endblock %}
