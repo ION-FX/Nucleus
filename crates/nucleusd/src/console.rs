@@ -39,7 +39,9 @@ async fn handle_socket(socket: WebSocket, rt: Arc<crate::state::ServerRuntime>) 
                 Ok(ev) => {
                     let text = match ev {
                         LogEvent::Data(s) => s,
-                        LogEvent::Exit(c) => format!("[nucleus] container exited with code {c}"),
+                        // watch_exit already pushes the exit line as log data;
+                        // rendering it here too duplicated the line on screen.
+                        LogEvent::Exit(_) => continue,
                     };
                     if tx.send(Message::Text(text.into())).await.is_err() {
                         break;

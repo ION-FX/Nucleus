@@ -399,49 +399,74 @@ pub async fn send_command(state: Arc<AppState>, id: &str, line: &str) -> Result<
 async fn attach_and_feed(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
     let id = rt.spec.id.clone();
     let name = container_name(&id);
-    let options = bollard::container::AttachContainerOptions {
-        detach_keys: Some("".to_string()),
-        stream: Some(true),
-        stdin: Some(true),
-        stdout: Some(true),
-        stderr: Some(true),
-        logs: Some(true),
-    };
-    match state.docker.attach_container(&name, Some(options)).await {
-        Ok(res) => {
-            *rt.stdin.lock().unwrap() = Some(res.input);
+    // The first attach replays history so late console connections see boot
+    // output; re-attachments after a dropped stream must not, or the console
+    // would show the same lines twice.
+    let mut replay = true;
+    while rt.running.load(Ordering::Relaxed) {
+        let options = bollard::container::AttachContainerOptions {
+            detach_keys: Some("".to_string()),
+            stream: Some(true),
+            stdin: Some(true),
+            stdout: Some(true),
+            stderr: Some(true),
+            logs: Some(replay),
+        };
+        replay = false;
+        match state.docker.attach_container(&name, Some(options)).await {
+            Ok(res) => {
+                *rt.stdin.lock().unwrap() = Some(res.input);
 
-            let mut output = res.output;
-            while let Some(chunk) = output.next().await {
-                match chunk {
-                    Ok(out) => {
-                        let text = match out {
-                            bollard::container::LogOutput::StdErr { message }
-                            | bollard::container::LogOutput::StdOut { message }
-                            | bollard::container::LogOutput::Console { message }
-                            | bollard::container::LogOutput::StdIn { message } => {
-                                String::from_utf8_lossy(&message).to_string()
-                            }
-                        };
-                        for line in text.lines() {
-                            if !line.trim().is_empty() {
-                                rt.push_log(line);
+                let mut output = res.output;
+                while let Some(chunk) = output.next().await {
+                    match chunk {
+                        Ok(out) => {
+                            let text = match out {
+                                bollard::container::LogOutput::StdErr { message }
+                                | bollard::container::LogOutput::StdOut { message }
+                                | bollard::container::LogOutput::Console { message }
+                                | bollard::container::LogOutput::StdIn { message } => {
+                                    String::from_utf8_lossy(&message).to_string()
+                                }
+                            };
+                            for line in text.lines() {
+                                if !line.trim().is_empty() {
+                                    rt.push_log(line);
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        tracing::debug!(%e, "attach stream ended");
-                        break;
+                        Err(e) => {
+                            tracing::debug!(%e, "attach stream ended");
+                            break;
+                        }
                     }
                 }
+                if !rt.running.load(Ordering::Relaxed) {
+                    break; // container exited; nothing to re-attach to
+                }
+                // A container exit also ends this stream; give watch_exit a
+                // moment to mark that before treating the drop as a hiccup.
+                for _ in 0..4 {
+                    if !rt.running.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                if !rt.running.load(Ordering::Relaxed) {
+                    break;
+                }
+                *rt.stdin.lock().unwrap() = None;
+                tracing::debug!(server = %id, "attach stream dropped; re-attaching");
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
-            *rt.stdin.lock().unwrap() = None;
-        }
-        Err(e) => {
-            tracing::warn!(%e, server = %id, "attach failed; falling back to logs");
-            fallback_log_pump(state, rt).await;
+            Err(e) => {
+                tracing::warn!(%e, server = %id, "attach failed; falling back to logs");
+                fallback_log_pump(state, rt).await;
+                return;
+            }
         }
     }
+    *rt.stdin.lock().unwrap() = None;
 }
 
 async fn fallback_log_pump(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
@@ -480,50 +505,123 @@ async fn fallback_log_pump(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
 
 async fn watch_exit(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
     let name = container_name(&rt.spec.id);
-    let mut stream = state.docker.wait_container(
-        &name,
-        None::<bollard::container::WaitContainerOptions<String>>,
-    );
-    if let Some(item) = stream.next().await {
-        let code = item.map(|s| s.status_code).unwrap_or(-1);
-        rt.running.store(false, Ordering::Relaxed);
-        *rt.exit_code.lock().unwrap() = Some(code);
-        *rt.stdin.lock().unwrap() = None;
+    // The wait stream is a long-lived HTTP connection that occasionally drops
+    // for unrelated reasons (a ~35-minute-old wait once died mid-idle). While
+    // the container is genuinely still running, re-arm; when it is gone, take
+    // the real exit code from inspect so we never report a bogus exit.
+    let code = loop {
+        let mut stream = state.docker.wait_container(
+            &name,
+            None::<bollard::container::WaitContainerOptions<String>>,
+        );
+        match stream.next().await {
+            Some(Ok(s)) => break s.status_code,
+            Some(Err(e)) => {
+                tracing::debug!(error = %e, server = %rt.spec.id, "exit watch stream dropped");
+                match state.docker.inspect_container(&name, None).await {
+                    Ok(c) if c.state.as_ref().and_then(|s| s.running) == Some(true) => {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                    Ok(c) => {
+                        break c.state.as_ref().and_then(|s| s.exit_code).unwrap_or(-1);
+                    }
+                    Err(_) => return, // container removed; nothing left to watch
+                }
+            }
+            None => return,
+        }
+    };
+
+    rt.running.store(false, Ordering::Relaxed);
+    *rt.exit_code.lock().unwrap() = Some(code);
+    *rt.stdin.lock().unwrap() = None;
+    if code == 0 {
+        rt.push_log("[nucleus] container exited cleanly");
+    } else {
         rt.push_log(&format!("[nucleus] container exited with code {code}"));
-        let _ = rt.log_tx.send(crate::state::decode_exit_event(code));
-        let _ = state.exit_tx.send((rt.spec.id.clone(), code));
     }
+    let _ = rt.log_tx.send(crate::state::decode_exit_event(code));
+    let _ = state.exit_tx.send((rt.spec.id.clone(), code));
 }
 
 async fn graceful_stop(state: Arc<AppState>, rt: Arc<ServerRuntime>) {
     use tokio::io::AsyncWriteExt;
+    let name = container_name(&rt.spec.id);
+    rt.push_log("[nucleus] stop requested");
+
+    // Preferred path: the game's own console command (`stop` on Minecraft),
+    // which shuts the server down and saves the world.
+    let mut console_sent = false;
     if let Some(cmd) = rt.spec.stop_command.clone() {
         let mut taken = { rt.stdin.lock().unwrap().take() };
-        let mut sent = false;
         if let Some(writer) = taken.as_mut() {
-            sent = writer
+            console_sent = writer
                 .write_all(format!("{cmd}\n").as_bytes())
                 .await
                 .is_ok()
                 && writer.flush().await.is_ok();
             *rt.stdin.lock().unwrap() = taken;
         }
-        if sent {
-            for _ in 0..30 {
-                if !rt.running.load(Ordering::Relaxed) {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(1500)).await;
-            }
-        }
     }
+
+    // Our containers run `bash -c <startup>` (or sh), so the shell is PID 1
+    // and docker stop's SIGTERM dies with it — bash does not forward signals.
+    // When there was no console command to send, TERM the game process
+    // directly inside the container instead.
+    if !console_sent {
+        term_game_process(&state, &name).await;
+    }
+
+    for _ in 0..30 {
+        if !rt.running.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+
+    rt.push_log("[nucleus] process did not exit in time; forcing it down");
     let _ = state
         .docker
         .stop_container(
-            &container_name(&rt.spec.id),
+            &name,
             Some(bollard::container::StopContainerOptions { t: 20 }),
         )
         .await;
+}
+
+/// SIGTERM the game process inside the container via exec: every `java`
+/// process if any, otherwise PID 1's children (the startup shell's game).
+async fn term_game_process(state: &Arc<AppState>, name: &str) {
+    let script = "p=''; for d in /proc/[0-9]*; do [ \"$(cat \"$d/comm\" 2>/dev/null)\" = java ] && p=\"$p ${d#/proc/}\"; done; \
+if [ -n \"$p\" ]; then kill -TERM $p; else for d in /proc/[0-9]*; do i=${d#/proc/}; [ \"$i\" = 1 ] && continue; \
+[ \"$(awk '{print $4}' \"$d/stat\" 2>/dev/null)\" = 1 ] && kill -TERM \"$i\"; done; fi";
+    let exec_cfg = bollard::exec::CreateExecOptions {
+        cmd: Some(vec![
+            "/bin/bash".to_string(),
+            "-c".to_string(),
+            script.to_string(),
+        ]),
+        ..Default::default()
+    };
+    match state.docker.create_exec(name, exec_cfg).await {
+        Ok(res) => {
+            if let Err(e) = state
+                .docker
+                .start_exec(
+                    &res.id,
+                    Some(bollard::exec::StartExecOptions {
+                        detach: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+            {
+                tracing::warn!(error = %e, container = %name, "exec SIGTERM failed");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, container = %name, "create exec for SIGTERM failed"),
+    }
 }
 
 /// Minecraft-family servers read their listen port from `server.properties`
