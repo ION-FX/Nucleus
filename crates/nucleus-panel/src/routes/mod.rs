@@ -167,7 +167,8 @@ pub fn router(app: SharedApp) -> axum::Router {
             "/admin/eggs",
             get(admin::eggs_page).post(admin::eggs_import),
         )
-        .route("/static/{*path}", get(static_asset))
+        .route("/static/{*path}", get(static_legacy))
+        .route("/asset/{*path}", get(static_asset))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(app.clone())
         .nest("/api/v1", api::router(app.clone()))
@@ -243,6 +244,23 @@ fn asset_response(
         bytes,
     )
         .into_response()
+}
+
+/// Legacy `/static` mount: templates moved to `/asset` (cache-busted URL —
+/// browsers that heuristically cached these files before cache headers
+/// existed never revalidate, so the old URLs can't be trusted). Served with
+/// `no-store` so even fresh fetches are never reused.
+async fn static_legacy(
+    State(app): State<SharedApp>,
+    AxumPath(path): AxumPath<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let mut res = static_asset(State(app), AxumPath(path), headers).await;
+    res.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    res
 }
 
 async fn static_asset(

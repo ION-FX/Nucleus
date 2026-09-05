@@ -896,7 +896,7 @@ textarea.editor {
   transform: translateX(-50%);
   width: 74%;
   aspect-ratio: 2 / 1;
-  background: url("/static/prime-emblem.png") no-repeat center / contain;
+  background: url("/asset/prime-emblem.png") no-repeat center / contain;
   mix-blend-mode: screen;
   opacity: 0.5;
   pointer-events: none;
