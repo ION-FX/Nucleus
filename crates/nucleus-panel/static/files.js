@@ -157,6 +157,18 @@
     api("/files/extract", { path: p, action: "extract" }).then(function () { toast("Extracted"); setTimeout(refresh, 600); }).catch(function (e) { toast("Error: " + e.message, "error"); });
   });
 
+  // per-row delete
+  document.querySelectorAll(".row-delete").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var p = b.dataset.path;
+      var name = p.split("/").filter(Boolean).pop() || p;
+      if (!confirm("Delete " + name + "?")) return;
+      api("/files/delete", { path: p })
+        .then(function () { toast("Deleted"); setTimeout(refresh, 400); })
+        .catch(function (e) { toast("Error: " + e.message, "error"); });
+    });
+  });
+
   // multi-delete
   document.getElementById("btn-delete-multi").addEventListener("click", function () {
     var paths = getChecked();

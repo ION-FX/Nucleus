@@ -309,23 +309,30 @@ pub async fn delete(
         tokio::fs::remove_file(&target).await
     };
     if let Err(e) = res {
-        if e.kind() == std::io::ErrorKind::PermissionDenied {
-            // Game containers run as root, so files they wrote are
-            // root-owned and the daemon user can't unlink them. Remove via a
-            // throwaway container bind-mounted over the server dir.
-            let rel = target
-                .strip_prefix(&root)
-                .unwrap_or(Path::new(&req.path))
-                .to_string_lossy()
-                .replace('\\', "/");
-            docker_remove(&state, &root, &rel)
-                .await
-                .with_context(|| format!("deleting root-owned {}", req.path))?;
-            return Ok(StatusCode::NO_CONTENT);
+        match e.kind() {
+            // Already gone (double-click, stale listing): deleting is
+            // idempotent, so report success rather than an error.
+            std::io::ErrorKind::NotFound => return Ok(StatusCode::NO_CONTENT),
+            std::io::ErrorKind::PermissionDenied => {
+                // Game containers run as root, so files they wrote are
+                // root-owned and the daemon user can't unlink them. Remove via a
+                // throwaway container bind-mounted over the server dir.
+                let rel = target
+                    .strip_prefix(&root)
+                    .unwrap_or(Path::new(&req.path))
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                docker_remove(&state, &root, &rel)
+                    .await
+                    .with_context(|| format!("deleting root-owned {}", req.path))?;
+                return Ok(StatusCode::NO_CONTENT);
+            }
+            _ => {
+                return Err(anyhow::Error::from(e)
+                    .context(format!("deleting {}", req.path))
+                    .into());
+            }
         }
-        return Err(anyhow::Error::from(e)
-            .context(format!("deleting {}", req.path))
-            .into());
     }
     Ok(StatusCode::NO_CONTENT)
 }

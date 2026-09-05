@@ -97,6 +97,7 @@
           <a class="btn btn-sm" href="/servers/{{ shell.id }}/files/edit?path={{ f.path_enc }}">Edit</a>
         {% endif %}
         <a class="btn btn-sm" href="/servers/{{ shell.id }}/files/download?path={{ f.path_enc }}">Download</a>
+        <button class="btn btn-sm btn-danger row-delete" data-path="{{ f.raw_path }}" title="Delete {{ f.name }}">🗑</button>
       </td>
     </tr>
   {% endfor %}

@@ -10,7 +10,28 @@
 <form method="post" action="/servers/{{ shell.id }}/files/edit">
   <input type="hidden" name="path" value="{{ raw_path }}">
   <textarea name="content" class="editor" spellcheck="false">{{ content }}</textarea>
-  <div class="actions" style="margin-top:14px;"><button class="btn btn-primary">Save changes</button></div>
+  <div class="actions" style="margin-top:14px;">
+    <button class="btn btn-primary">Save changes</button>
+    <button type="button" class="btn btn-danger" id="delete-open" data-path="{{ raw_path }}">Delete this file</button>
+  </div>
 </form>
 </section>
+<script>
+(function () {
+  var btn = document.getElementById("delete-open");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    var p = btn.dataset.path;
+    if (!confirm("Delete " + p + "?")) return;
+    fetch("/servers/{{ shell.id }}/files/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: p })
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      location.href = "/servers/{{ shell.id }}/files";
+    }).catch(function () { alert("Delete failed"); });
+  });
+})();
+</script>
 {% endblock %}
